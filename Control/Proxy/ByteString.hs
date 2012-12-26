@@ -7,11 +7,9 @@ import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Control.Proxy as P
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Internal as BSI
 import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Monoid as M
-import Data.Int (Int64)
 import Data.Word (Word8)
 import System.IO (Handle, hIsEOF)
 
@@ -32,10 +30,10 @@ toLazyD = P.foldrD BLI.Chunk
 headD
  :: (Monad m, P.Proxy p)
  => x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) r
-headD = P.foldD (\bs ->
+headD = P.foldD (\bs -> M.First $
     if (BS.null bs)
-        then M.First Nothing
-        else M.First $ Just $ BU.unsafeHead bs )
+        then Nothing
+        else Just $ BU.unsafeHead bs )
 
 headD_
  :: (Monad m, P.Proxy p)
@@ -51,10 +49,10 @@ headD_ = P.runIdentityK go where
 lastD
  :: (Monad m, P.Proxy p)
  => x -> p x BS.ByteString x BS.ByteString (WriterT (M.Last Word8) m) r
-lastD = P.foldD (\bs ->
+lastD = P.foldD (\bs -> M.Last $
     if (BS.null bs)
-        then M.Last Nothing
-        else M.Last $ Just $ BS.last bs )
+        then Nothing
+        else Just $ BS.last bs )
 
 tailD :: (Monad m, P.Proxy p) => x -> p x BS.ByteString x BS.ByteString m r
 tailD = P.runIdentityK go where
@@ -194,10 +192,10 @@ instance (Ord a) => Monoid (Maximum a) where
 maximumD
  :: (Monad m, P.Proxy p)
  => x -> p x BS.ByteString x BS.ByteString (WriterT (Maximum Word8) m) r
-maximumD = P.foldD (\bs ->
+maximumD = P.foldD (\bs -> Maximum $
     if (BS.null bs)
-        then Maximum Nothing
-        else Maximum $ Just $ BS.maximum bs )
+        then Nothing
+        else Just $ BS.maximum bs )
 
 newtype Minimum a = Minimum { getMinimum :: Maybe a }
 
@@ -210,10 +208,10 @@ instance (Ord a) => Monoid (Minimum a) where
 minimumD
  :: (Monad m, P.Proxy p)
  => x -> p x BS.ByteString x BS.ByteString (WriterT (Minimum Word8) m) r
-minimumD = P.foldD (\bs ->
+minimumD = P.foldD (\bs -> Minimum $
     if (BS.null bs)
-        then Minimum Nothing
-        else Minimum $ Just $ BS.minimum bs )
+        then Nothing
+        else Just $ BS.minimum bs )
 -}
 
 takeD :: (Monad m, P.Proxy p) => Int -> x -> p x BS.ByteString x BS.ByteString m x
