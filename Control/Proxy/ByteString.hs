@@ -286,18 +286,19 @@ dropWhileD pred () = P.runIdentityP go where
                 P.idT ()
 
 groupD
- :: (Monad m, P.Proxy p) => () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
+ :: (Monad m, P.Proxy p)
+ => () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 groupD = groupByD (==)
 
 groupByD
  :: (Monad m, P.Proxy p)
  => (Word8 -> Word8 -> Bool)
- -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
+ -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 groupByD eq () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
         case mbs of
-            Nothing -> return ()
+            Nothing -> go1
             Just bs
                 | BS.null bs -> go1
                 | otherwise -> do
@@ -307,7 +308,9 @@ groupByD eq () = P.runIdentityP go1 where
     go2 group0 = do
         mbs <- P.request ()
         case mbs of
-            Nothing -> P.respond group0
+            Nothing -> do
+                P.respond group0
+                go1
             Just bs
                 | BS.null bs -> go2 group0
                 | otherwise -> do
