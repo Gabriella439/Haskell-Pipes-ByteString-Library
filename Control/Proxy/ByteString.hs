@@ -361,6 +361,28 @@ splitWithD pred () = P.runIdentityP go1 where
                     mapM_ P.respond (init gs)
                     go2 (last gs)
 
+elemD
+ :: (Monad m, P.Proxy p)
+ => Word8 -> x -> p x BS.ByteString x BS.ByteString (WriterT M.Any m) r
+elemD w8 = P.foldD (M.Any . BS.elem w8)
+
+elemD_
+ :: (Monad m, P.Proxy p)
+ => Word8 -> x -> p x BS.ByteString x BS.ByteString (WriterT M.Any m) ()
+elemD_ w8 = P.runIdentityK go where
+    go x = do
+        bs <- P.request x
+        if (BS.elem w8 bs)
+            then lift $ tell $ M.Any True
+            else do
+                x2 <- P.respond bs
+                go x2
+
+notElemD
+ :: (Monad m, P.Proxy p)
+ => Word8 -> x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) r
+notElemD w8 = P.foldD (M.All . BS.notElem w8)
+
 hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetS size h () = P.runIdentityP go where
     go = do
