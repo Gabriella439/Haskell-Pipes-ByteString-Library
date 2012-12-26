@@ -109,6 +109,17 @@ intersperseD w8 () = P.runIdentityP $ do
         bs <- P.request ()
         P.respond (BS.intersperse w8 bs)
 
+intercalateD
+ :: (Monad m, P.Proxy p)
+ => BS.ByteString -> () -> P.Pipe p BS.ByteString BS.ByteString m r
+intercalateD bsi () = P.runIdentityP $ do
+    bs0 <- P.request ()
+    P.respond bs0
+    forever $ do
+        bs <- P.request ()
+        P.respond bsi
+        P.respond bs
+
 foldlD'
  :: (Monad m, P.Proxy p)
  => (a -> Word8 -> a) -> x -> p x BS.ByteString x BS.ByteString (StateT a m) r
