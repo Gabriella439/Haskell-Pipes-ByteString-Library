@@ -383,6 +383,30 @@ notElemD
  => Word8 -> x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) r
 notElemD w8 = P.foldD (M.All . BS.notElem w8)
 
+findD
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) r
+findD pred = P.foldD (M.First . BS.find pred)
+
+findD_
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) ()
+findD_ pred = P.runIdentityK go where
+    go x = do
+        bs <- P.request x
+        case BS.find pred bs of
+            Nothing -> do
+                x2 <- P.respond bs
+                go x2
+            Just w8 -> lift $ tell $ M.First $ Just w8
+
+filterD
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m r
+filterD pred = P.mapD (BS.filter pred)
+
 hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetS size h () = P.runIdentityP go where
     go = do
