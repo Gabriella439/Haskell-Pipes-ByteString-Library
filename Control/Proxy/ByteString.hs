@@ -329,14 +329,19 @@ groupByD eq () = P.runIdentityP go1 where
                                     mapM_ P.respond (init gs )
                                     go2 (last gs )
 
+splitD
+ :: (Monad m, P.Proxy p)
+ => Word8 -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
+splitD w8 = splitWithD (w8 ==)
+
 splitWithD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
+ => (Word8 -> Bool) -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 splitWithD pred () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
         case mbs of
-            Nothing -> return ()
+            Nothing -> go1
             Just bs -> case BS.splitWith pred bs of
                 [] -> go1
                 gs -> do
@@ -345,7 +350,9 @@ splitWithD pred () = P.runIdentityP go1 where
     go2 group0 = do
         mbs <- P.request ()
         case mbs of
-            Nothing -> P.respond group0
+            Nothing -> do
+                P.respond group0
+                go1
             Just bs -> case BS.splitWith pred bs of
                 []        -> go2 group0
                 [group1]  -> go2 (BS.append group0 group1)
