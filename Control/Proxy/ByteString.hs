@@ -2,11 +2,15 @@ module Control.P.Proxy.ByteString where
 
 import Control.Monad (forever)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT)
 import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Control.Proxy as P
-import qualified Data.ByteString as B
+import qualified Data.ByteString as BS
+import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Internal as BSI
+import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
-import Data.Monoid (All(All), Any(Any), Sum(Sum))
+import qualified Data.Monoid as M
 import Data.Int (Int64)
 import Data.Word (Word8)
 import System.IO (Handle, hIsEOF)
@@ -14,46 +18,49 @@ import System.IO (Handle, hIsEOF)
 defaultChunkSize :: Int
 defaultChunkSize = 4096
 
-packS :: (Monad m, P.Proxy p) => [Word8] -> () -> P.Producer p B.ByteString m ()
-packS w8s () = P.runIdentityP $ P.respond (B.pack w8s)
-
-unpackD
+fromLazyS
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT [Word8] m) r
-unpackD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ B.unpack bs
-    P.respond bs
+ => BL.ByteString -> () -> P.Producer p BS.ByteString m ()
+fromLazyS bs () =
+    P.runIdentityP $ BLI.foldrChunks (\e a -> P.respond e >> a) (return ()) bs
 
-fromStrictS
- :: (Monad m, P.Proxy p) => B.ByteString -> () -> P.Producer p B.ByteString m ()
-fromStrictS bs () = P.runIdentityP $ P.respond bs
-
-toStrictD
+toLazyD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT B.ByteString m) r
-toStrictD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell bs
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (M.Endo BL.ByteString) m) r
+toLazyD = P.foldrD BLI.Chunk
 
-fromChunksS
- :: (Monad m, P.Proxy p) => [B.ByteString] -> () -> P.Producer p B.ByteString m ()
-fromChunksS = P.fromListS
-
-toChunksD
+headD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT [B.ByteString] m) r
-toChunksD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell [bs]
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) r
+headD = P.foldD (\bs ->
+    if (BS.null bs)
+        then M.First Nothing
+        else M.First $ Just $ BU.unsafeHead bs )
 
-tailD :: (Monad m, P.Proxy p) => x -> p x B.ByteString x B.ByteString m r
-tailD = P.runIdentityK go where
-    go = \x -> do
+headD_
+ :: (Monad m, P.Proxy p)
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) ()
+headD_ = P.runIdentityK go where
+    go x = do
         bs <- P.request x
-        if (B.null bs)
+        if (BS.null bs)
+            then do
+                x2 <- P.respond bs
+                go x2
+            else lift $ tell $ M.First $ Just $ BU.unsafeHead bs
+lastD
+ :: (Monad m, P.Proxy p)
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (M.Last Word8) m) r
+lastD = P.foldD (\bs ->
+    if (BS.null bs)
+        then M.Last Nothing
+        else M.Last $ Just $ BS.last bs )
+
+tailD :: (Monad m, P.Proxy p) => x -> p x BS.ByteString x BS.ByteString m r
+tailD = P.runIdentityK go where
+    go x = do
+        bs <- P.request x
+        if (BS.null bs)
             then do
                 x2 <- P.respond bs
                 go x2
@@ -61,115 +68,108 @@ tailD = P.runIdentityK go where
                 x2 <- P.respond (BU.unsafeTail bs)
                 P.idT x2
 
--- | Fold that returns whether 'All' received 'ByteString's are empty
+-- | Fold that returns whether 'M.All' received 'ByteString's are empty
 nullD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT All m) r
-nullD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ All $ B.null bs
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) r
+nullD = P.foldD (M.All . BS.null)
 
-{-| Fold that returns whether 'All' received 'ByteString's are empty
+{-| Fold that returns whether 'M.All' received 'ByteString's are empty
 
     'nullD_' terminates on the first non-empty 'ByteString'. -}
 nullD_
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT All m) ()
+ => x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) ()
 nullD_ = P.runIdentityK go where
     go x = do
         bs <- P.request x
-        if (B.null bs)
+        if (BS.null bs)
             then do
                 x2 <- P.respond bs
                 go x2
-            else lift $ tell $ All False
+            else lift $ tell $ M.All False
 
 lengthD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT (Sum Int) m) r
-lengthD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ Sum $ B.length bs
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (M.Sum Int) m) r
+lengthD = P.foldD (M.Sum . BS.length)
 
 mapD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Word8) -> x -> p x B.ByteString x B.ByteString m r
-mapD f = P.mapD (B.map f)
+ => (Word8 -> Word8) -> x -> p x BS.ByteString x BS.ByteString m r
+mapD f = P.mapD (BS.map f)
 
 intersperseD
- :: (Monad m, P.Proxy p) => Word8 -> () -> P.Pipe p B.ByteString B.ByteString m r
+ :: (Monad m, P.Proxy p) => Word8 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 intersperseD w8 () = P.runIdentityP $ do
     bs0 <- P.request ()
-    P.respond (B.intersperse w8 bs0)
+    P.respond (BS.intersperse w8 bs0)
     forever $ do
-        P.respond (B.singleton w8)
+        P.respond (BS.singleton w8)
         bs <- P.request ()
-        P.respond (B.intersperse w8 bs)
+        P.respond (BS.intersperse w8 bs)
 
-intercalateD :: (Monad m, P.Proxy p)
- => B.ByteString -> () -> P.Pipe p B.ByteString B.ByteString m r
-intercalateD bsi () = P.runIdentityP $ do
-    bs0 <- P.request ()
-    P.respond bs0
-    forever $ do
-        bs <- P.request ()
-        P.respond bsi
-        P.respond bs
+foldlD'
+ :: (Monad m, P.Proxy p)
+ => (a -> Word8 -> a) -> x -> p x BS.ByteString x BS.ByteString (StateT a m) r
+foldlD' f = P.foldlD' (BS.foldl' f)
+
+foldrD
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> a -> a)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.Endo a) m) r
+foldrD f = P.foldrD (\e a -> BS.foldr f a e)
 
 concatMapD
  :: (Monad m, P.Proxy p)
- => (Word8 -> B.ByteString) -> x -> p x B.ByteString x B.ByteString m r
-concatMapD f = P.mapD (B.concatMap f)
+ => (Word8 -> BS.ByteString) -> x -> p x BS.ByteString x BS.ByteString m r
+concatMapD f = P.mapD (BS.concatMap f)
 
--- | Fold that returns whether 'Any' received 'Word8's satisfy the predicate
+-- | Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
 anyD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x B.ByteString x B.ByteString (WriterT Any m) r
-anyD pred = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ Any $ B.any pred bs
-    P.respond bs
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT M.Any m) r
+anyD pred = P.foldD (M.Any . BS.any pred)
 
-{-| Fold that returns whether 'Any' received 'Word8's satisfy the predicate
+{-| Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
 
     'anyD_' terminates on the first 'Word8' that satisfies the predicate. -}
 anyD_
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x B.ByteString x B.ByteString (WriterT Any m) ()
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT M.Any m) ()
 anyD_ pred = P.runIdentityK go where
     go x = do
         bs <- P.request x
-        if (B.any pred bs)
-            then lift $ tell $ Any True
+        if (BS.any pred bs)
+            then lift $ tell $ M.Any True
             else do
                 x2 <- P.respond bs
                 go x2
 
--- | Fold that returns whether 'All' received 'Word8's satisfy the predicate
+-- | Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
 allD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x B.ByteString x B.ByteString (WriterT All m) r
-allD pred = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ All $ B.all pred bs
-    P.respond bs
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) r
+allD pred = P.foldD (M.All . BS.all pred)
 
-{-| Fold that returns whether 'All' received 'Word8's satisfy the predicate
+{-| Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
 
     'allD_' terminates on the first 'Word8' that fails the predicate. -}
 allD_
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x B.ByteString x B.ByteString (WriterT All m) ()
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT M.All m) ()
 allD_ pred = P.runIdentityK go where
     go x = do
         bs <- P.request x
-        if (B.all pred bs)
+        if (BS.all pred bs)
             then do
                 x2 <- P.respond bs
                 go x2
-            else lift $ tell $ All False
+            else lift $ tell $ M.All False
 
 {-
 newtype Maximum a = Maximum { getMaximum :: Maybe a }
@@ -182,11 +182,11 @@ instance (Ord a) => Monoid (Maximum a) where
 
 maximumD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT (Maximum Word8) m) r
-maximumD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ Maximum $ Just $ B.maximum bs
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (Maximum Word8) m) r
+maximumD = P.foldD (\bs ->
+    if (BS.null bs)
+        then Maximum Nothing
+        else Maximum $ Just $ BS.maximum bs )
 
 newtype Minimum a = Minimum { getMinimum :: Maybe a }
 
@@ -198,20 +198,20 @@ instance (Ord a) => Monoid (Minimum a) where
 
 minimumD
  :: (Monad m, P.Proxy p)
- => x -> p x B.ByteString x B.ByteString (WriterT (Minimum Word8) m) r
-minimumD = P.runIdentityK $ P.foreverK $ \x -> do
-    bs <- P.request x
-    lift $ tell $ Minimum $ Just $ B.minimum bs
-    P.respond bs
+ => x -> p x BS.ByteString x BS.ByteString (WriterT (Minimum Word8) m) r
+minimumD = P.foldD (\bs ->
+    if (BS.null bs)
+        then Minimum Nothing
+        else Minimum $ Just $ BS.minimum bs )
 -}
 
-takeD :: (Monad m, P.Proxy p) => Int -> x -> p x B.ByteString x B.ByteString m x
+takeD :: (Monad m, P.Proxy p) => Int -> x -> p x BS.ByteString x BS.ByteString m x
 takeD n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = return
         | otherwise = \x -> do
             bs <- P.request x
-            let len = B.length bs
+            let len = BS.length bs
             if (len > n)
                 then P.respond (BU.unsafeTake n bs)
                 else do
@@ -219,13 +219,13 @@ takeD n0 = P.runIdentityK (go n0) where
                     go (n - len) x2
 
 takeD_
- :: (Monad m, P.Proxy p) => Int -> x -> p x B.ByteString x B.ByteString m ()
+ :: (Monad m, P.Proxy p) => Int -> x -> p x BS.ByteString x BS.ByteString m ()
 takeD_ n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = \_ -> return ()
         | otherwise = \x -> do
             bs <- P.request x
-            let len = B.length bs
+            let len = BS.length bs
             if (len > n)
                 then do
                     P.respond (BU.unsafeTake n bs)
@@ -235,13 +235,13 @@ takeD_ n0 = P.runIdentityK (go n0) where
                     go (n - len) x2
 
 dropD
- :: (Monad m, P.Proxy p) => Int -> () -> P.Pipe p B.ByteString B.ByteString m r
+ :: (Monad m, P.Proxy p) => Int -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 dropD n0 () = P.runIdentityP (go n0) where
     go n
         | n <= 0 = P.idT ()
         | otherwise = do
             bs <- P.request ()
-            let len = B.length bs
+            let len = BS.length bs
             if (len >= n)
                 then do
                     P.respond (BU.unsafeDrop n bs)
@@ -250,11 +250,11 @@ dropD n0 () = P.runIdentityP (go n0) where
 
 takeWhileD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x B.ByteString x B.ByteString m ()
+ => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m ()
 takeWhileD pred = P.runIdentityK go where
     go x = do
         bs <- P.request x
-        case B.findIndex (not . pred) bs of
+        case BS.findIndex (not . pred) bs of
             Nothing -> do
                 x2 <- P.respond bs
                 go x2
@@ -264,33 +264,33 @@ takeWhileD pred = P.runIdentityK go where
 
 dropWhileD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> () -> P.Pipe p B.ByteString B.ByteString m r
+ => (Word8 -> Bool) -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 dropWhileD pred () = P.runIdentityP go where
     go = do
         bs <- P.request ()
-        case B.findIndex (not . pred) bs of
+        case BS.findIndex (not . pred) bs of
             Nothing -> go
             Just i -> do
                 P.respond (BU.unsafeDrop i bs)
                 P.idT ()
 
 groupD
- :: (Monad m, P.Proxy p) => () -> P.Pipe p (Maybe B.ByteString) B.ByteString m ()
+ :: (Monad m, P.Proxy p) => () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
 groupD = groupByD (==)
 
 groupByD
  :: (Monad m, P.Proxy p)
  => (Word8 -> Word8 -> Bool)
- -> () -> P.Pipe p (Maybe B.ByteString) B.ByteString m ()
+ -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
 groupByD eq () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
         case mbs of
             Nothing -> return ()
             Just bs
-                | B.null bs -> go1
+                | BS.null bs -> go1
                 | otherwise -> do
-                    let groups = B.groupBy eq bs
+                    let groups = BS.groupBy eq bs
                     mapM_ P.respond (init groups)
                     go2 (last groups)
     go2 group0 = do
@@ -298,16 +298,16 @@ groupByD eq () = P.runIdentityP go1 where
         case mbs of
             Nothing -> P.respond group0
             Just bs
-                | B.null bs -> go2 group0
+                | BS.null bs -> go2 group0
                 | otherwise -> do
-                    let groups = B.groupBy eq bs
+                    let groups = BS.groupBy eq bs
                     case groups of
                         []              -> go2 group0
-                        [group1]        -> go2 (B.append group0 group1)
+                        [group1]        -> go2 (BS.append group0 group1)
                         gs@(group1:gs') -> do
-                            if (B.head group0 == B.head group1)
+                            if (BS.head group0 == BS.head group1)
                                 then do
-                                    P.respond (B.append group0 group1)
+                                    P.respond (BS.append group0 group1)
                                     mapM_ P.respond (init gs')
                                     go2 (last gs')
                                 else do
@@ -317,13 +317,13 @@ groupByD eq () = P.runIdentityP go1 where
 
 splitWithD
  :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> () -> P.Pipe p (Maybe B.ByteString) B.ByteString m ()
+ => (Word8 -> Bool) -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m ()
 splitWithD pred () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
         case mbs of
             Nothing -> return ()
-            Just bs -> case B.splitWith pred bs of
+            Just bs -> case BS.splitWith pred bs of
                 [] -> go1
                 gs -> do
                     mapM_ P.respond (init gs)
@@ -332,35 +332,35 @@ splitWithD pred () = P.runIdentityP go1 where
         mbs <- P.request ()
         case mbs of
             Nothing -> P.respond group0
-            Just bs -> case B.splitWith pred bs of
+            Just bs -> case BS.splitWith pred bs of
                 []        -> go2 group0
-                [group1]  -> go2 (B.append group0 group1)
+                [group1]  -> go2 (BS.append group0 group1)
                 group1:gs -> do
-                    P.respond (B.append group0 group1)
+                    P.respond (BS.append group0 group1)
                     mapM_ P.respond (init gs)
                     go2 (last gs)
 
-hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p B.ByteString IO ()
+hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetS size h () = P.runIdentityP go where
     go = do
         eof <- lift $ hIsEOF h
         if eof
             then return ()
             else do
-                bs <- lift $ B.hGet h size
+                bs <- lift $ BS.hGet h size
                 P.respond bs
                 go
 
-hReadFileS :: (P.Proxy p) => Handle -> () -> P.Producer p B.ByteString IO ()
+hReadFileS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
 hReadFileS = hGetS defaultChunkSize
 
-hGetLineS :: (P.Proxy p) => Handle -> () -> P.Producer p B.ByteString IO ()
+hGetLineS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetLineS h () = P.runIdentityP go where
     go = do
         eof <- lift $ hIsEOF h
         if eof
             then return ()
             else do
-                bs <- lift $ B.hGetLine h
+                bs <- lift $ BS.hGetLine h
                 P.respond bs
                 go
