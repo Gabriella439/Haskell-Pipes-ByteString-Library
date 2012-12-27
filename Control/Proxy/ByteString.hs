@@ -1,4 +1,71 @@
-module Control.P.Proxy.ByteString where
+module Control.Proxy.ByteString (
+    -- * Introducing and Eliminating ByteStrings
+    fromLazyS,
+    toLazyD,
+
+    -- * Basic Interface
+    headD,
+    headD_,
+    lastD,
+    tailD,
+    initD,
+    nullD,
+    nullD_,
+    lengthD,
+
+    -- * Transforming ByteStrings
+    mapD,
+    intersperseD,
+    intercalateD,
+
+    -- * Reducing ByteStrings (folds)
+    foldlD',
+    foldrD,
+
+    -- ** Special folds
+    concatMapD,
+    anyD,
+    anyD_,
+    allD,
+    allD_,
+
+    -- * Substrings
+    -- ** Breaking strings
+    takeD,
+    dropD,
+    takeWhileD,
+    dropWhileD,
+    groupD,
+    groupByD,
+
+    -- ** Breaking into many substrings
+    splitD,
+    splitWithD,
+
+    -- * Searching ByteStrings
+    -- ** Searching by equality
+    elemD,
+    elemD_,
+    notElemD,
+
+    -- ** Searching with a predicate
+    findD,
+    findD_,
+    filterD,
+
+    -- * Indexing ByteStrings
+    indexD,
+    indexD_,
+    elemIndexD,
+    elemIndexD_,
+    elemIndicesD,
+    findIndexD,
+    findIndexD_,
+    findIndicesD,
+    countD,
+
+ 
+    ) where
 
 import Control.Monad (forever)
 import Control.Monad.Trans.Class (lift)
@@ -64,6 +131,27 @@ tailD = P.runIdentityK go where
                 x2 <- P.respond (BU.unsafeTail bs)
                 P.idT x2
 
+initD :: (Monad m, P.Proxy p) => x -> p x BS.ByteString x BS.ByteString m r
+initD = P.runIdentityK go0 where
+    go0 x = do
+        bs <- P.request x
+        if (BS.null bs)
+            then do
+                x2 <- P.respond bs
+                go0 x2
+            else do
+                x2 <- P.respond (BS.init bs)
+                go1 (BS.last bs) x2
+    go1 w8 x = do
+        bs <- P.request x
+        if (BS.null bs)
+            then do
+                x2 <- P.respond bs
+                go1 w8 x2
+            else do
+                x2 <- P.respond (BS.cons w8 (BS.init bs))
+                go1 (BS.last bs) x2
+
 -- | Fold that returns whether 'M.All' received 'ByteString's are empty
 nullD
  :: (Monad m, P.Proxy p)
@@ -96,7 +184,8 @@ mapD
 mapD f = P.mapD (BS.map f)
 
 intersperseD
- :: (Monad m, P.Proxy p) => Word8 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
+ :: (Monad m, P.Proxy p)
+ => Word8 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 intersperseD w8 () = P.runIdentityP $ do
     bs0 <- P.request ()
     P.respond (BS.intersperse w8 bs0)
@@ -213,22 +302,8 @@ minimumD = P.foldD (\bs -> Minimum $
 -}
 
 takeD
- :: (Monad m, P.Proxy p) => Int64 -> x -> p x BS.ByteString x BS.ByteString m x
-takeD n0 = P.runIdentityK (go n0) where
-    go n
-        | n <= 0 = return
-        | otherwise = \x -> do
-            bs <- P.request x
-            let len = fromIntegral $ BS.length bs
-            if (len > n)
-                then P.respond (BU.unsafeTake (fromIntegral n) bs)
-                else do
-                    x2 <- P.respond bs
-                    go (n - len) x2
-
-takeD_
  :: (Monad m, P.Proxy p) => Int64 -> x -> p x BS.ByteString x BS.ByteString m ()
-takeD_ n0 = P.runIdentityK (go n0) where
+takeD n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = \_ -> return ()
         | otherwise = \x -> do
