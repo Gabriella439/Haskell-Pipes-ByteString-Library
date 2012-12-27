@@ -10,11 +10,9 @@ import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Monoid as M
+import Data.Int (Int64)
 import Data.Word (Word8)
-import System.IO (Handle, hIsEOF)
-
-defaultChunkSize :: Int
-defaultChunkSize = 4096
+import System.IO (Handle, hIsEOF, stdout)
 
 fromLazyS
  :: (Monad m, P.Proxy p)
@@ -214,46 +212,48 @@ minimumD = P.foldD (\bs -> Minimum $
         else Just $ BS.minimum bs )
 -}
 
-takeD :: (Monad m, P.Proxy p) => Int -> x -> p x BS.ByteString x BS.ByteString m x
+takeD
+ :: (Monad m, P.Proxy p) => Int64 -> x -> p x BS.ByteString x BS.ByteString m x
 takeD n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = return
         | otherwise = \x -> do
             bs <- P.request x
-            let len = BS.length bs
+            let len = fromIntegral $ BS.length bs
             if (len > n)
-                then P.respond (BU.unsafeTake n bs)
+                then P.respond (BU.unsafeTake (fromIntegral n) bs)
                 else do
                     x2 <- P.respond bs
                     go (n - len) x2
 
 takeD_
- :: (Monad m, P.Proxy p) => Int -> x -> p x BS.ByteString x BS.ByteString m ()
+ :: (Monad m, P.Proxy p) => Int64 -> x -> p x BS.ByteString x BS.ByteString m ()
 takeD_ n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = \_ -> return ()
         | otherwise = \x -> do
             bs <- P.request x
-            let len = BS.length bs
+            let len = fromIntegral $ BS.length bs
             if (len > n)
                 then do
-                    P.respond (BU.unsafeTake n bs)
+                    P.respond (BU.unsafeTake (fromIntegral n) bs)
                     return ()
                 else do
                     x2 <- P.respond bs
                     go (n - len) x2
 
 dropD
- :: (Monad m, P.Proxy p) => Int -> () -> P.Pipe p BS.ByteString BS.ByteString m r
+ :: (Monad m, P.Proxy p)
+ => Int64 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 dropD n0 () = P.runIdentityP (go n0) where
     go n
         | n <= 0 = P.idT ()
         | otherwise = do
             bs <- P.request ()
-            let len = BS.length bs
+            let len = fromIntegral $ BS.length bs
             if (len >= n)
                 then do
-                    P.respond (BU.unsafeDrop n bs)
+                    P.respond (BU.unsafeDrop (fromIntegral n) bs)
                     P.idT ()
                 else go (n - len)
 
@@ -405,6 +405,123 @@ filterD
  => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m r
 filterD pred = P.mapD (BS.filter pred)
 
+indexD
+ :: (Monad m, P.Proxy p)
+ => Int64
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) r
+indexD n = P.runIdentityK (go n) where
+    go n x = do
+        bs <- P.request x
+        let len = fromIntegral $ BS.length bs
+        if (len <= n)
+            then do
+                x2 <- P.respond bs
+                go (n - len) x2
+            else do
+                lift $ tell $ M.First $ Just $ BS.index bs (fromIntegral n)
+                x2 <- P.respond bs
+                P.idT x2
+
+indexD_
+ :: (Monad m, P.Proxy p)
+ => Int64
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) ()
+indexD_ n = P.runIdentityK (go n) where
+    go n x = do
+        bs <- P.request x
+        let len = fromIntegral $ BS.length bs
+        if (len <= n)
+            then do
+                x2 <- P.respond bs
+                go (n - len) x2
+            else lift $ tell $ M.First $ Just $ BS.index bs (fromIntegral n)
+
+elemIndexD
+ :: (Monad m, P.Proxy p)
+ => Word8
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Int64) m) r
+elemIndexD w8 = P.runIdentityK (go 0) where
+    go n x = do
+        bs <- P.request x
+        case BS.elemIndex w8 bs of
+            Nothing -> do
+                x2 <- P.respond bs
+                go (n + fromIntegral (BS.length bs)) x2
+            Just i  -> do
+                lift $ tell $ M.First $ Just $ n + fromIntegral i
+                x2 <- P.respond bs
+                P.idT x2
+
+elemIndexD_
+ :: (Monad m, P.Proxy p)
+ => Word8
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Int64) m) ()
+elemIndexD_ w8 = P.runIdentityK (go 0) where
+    go n x = do
+        bs <- P.request x
+        case BS.elemIndex w8 bs of
+            Nothing -> do
+                x2 <- P.respond bs
+                go (n + fromIntegral (BS.length bs)) x2
+            Just i  -> lift $ tell $ M.First $ Just $ n + fromIntegral i
+
+elemIndicesD
+ :: (Monad m, P.Proxy p)
+ => Word8
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT [Int64] m) r
+elemIndicesD w8 = P.foldD (map fromIntegral . BS.elemIndices w8)
+
+findIndexD
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Int64) m) r
+findIndexD pred = P.runIdentityK (go 0) where
+    go n x = do
+        bs <- P.request x
+        case BS.findIndex pred bs of
+            Nothing -> do
+                x2 <- P.respond bs
+                go (n + fromIntegral (BS.length bs)) x2
+            Just i  -> do
+                lift $ tell $ M.First $ Just $ n + fromIntegral i
+                x2 <- P.respond bs
+                P.idT x2
+
+findIndexD_
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.First Int64) m) ()
+findIndexD_ pred = P.runIdentityK (go 0) where
+    go n x = do
+        bs <- P.request x
+        case BS.findIndex pred bs of
+            Nothing -> do
+                x2 <- P.respond bs
+                go (n + fromIntegral (BS.length bs)) x2
+            Just i  -> lift $ tell $ M.First $ Just $ n + fromIntegral i
+
+findIndicesD
+ :: (Monad m, P.Proxy p)
+ => (Word8 -> Bool)
+ -> x -> p x BS.ByteString x BS.ByteString (WriterT [Int64] m) r
+findIndicesD pred = P.runIdentityK (go 0) where
+    go n x = do
+        bs <- P.request x
+        lift $ tell $ map (\i -> n + fromIntegral i) $ BS.findIndices pred bs
+        x2 <- P.respond bs
+        go (n + fromIntegral (BS.length bs)) x2
+
+countD
+ :: (Monad m, P.Proxy p)
+ => Word8 -> x -> p x BS.ByteString x BS.ByteString (WriterT (M.Sum Int64) m) r
+countD w8 = P.foldD (M.Sum . fromIntegral . BS.count w8)
+
+getContentsS :: (P.Proxy p) => () -> P.Producer p BS.ByteString IO ()
+getContentsS = hGetContentsS stdout
+
+hGetContentsS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
+hGetContentsS = hGetS BLI.defaultChunkSize
+
 hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetS size h () = P.runIdentityP go where
     go = do
@@ -416,16 +533,13 @@ hGetS size h () = P.runIdentityP go where
                 P.respond bs
                 go
 
-hReadFileS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
-hReadFileS = hGetS defaultChunkSize
-
-hGetLineS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
-hGetLineS h () = P.runIdentityP go where
-    go = do
+hGetS_ :: (P.Proxy p) => Handle -> Int -> P.Server p Int BS.ByteString IO ()
+hGetS_ h = P.runIdentityK go where
+    go size = do
         eof <- lift $ hIsEOF h
         if eof
             then return ()
             else do
-                bs <- lift $ BS.hGetLine h
-                P.respond bs
-                go
+                bs <- lift $ BS.hGet h size
+                size2 <- P.respond bs
+                go size2
