@@ -12,7 +12,7 @@ import qualified Data.ByteString.Unsafe as BU
 import qualified Data.Monoid as M
 import Data.Int (Int64)
 import Data.Word (Word8)
-import System.IO (Handle, hIsEOF, stdout)
+import System.IO (Handle, hIsEOF, stdin, stdout)
 
 fromLazyS
  :: (Monad m, P.Proxy p)
@@ -517,10 +517,17 @@ countD
 countD w8 = P.foldD (M.Sum . fromIntegral . BS.count w8)
 
 getContentsS :: (P.Proxy p) => () -> P.Producer p BS.ByteString IO ()
-getContentsS = hGetContentsS stdout
+getContentsS = hGetContentsS stdin
+
+putContentsD :: (P.Proxy p) => x -> p x BS.ByteString x BS.ByteString IO ()
+putContentsD = hPutContentsD stdout
 
 hGetContentsS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetContentsS = hGetS BLI.defaultChunkSize
+
+hPutContentsD
+ :: (P.Proxy p) => Handle -> x -> p x BS.ByteString x BS.ByteString IO r
+hPutContentsD h = P.useD (BS.hPut h)
 
 hGetS :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetS size h () = P.runIdentityP go where
