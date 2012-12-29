@@ -9,7 +9,7 @@ Author: Gabriel Gonzalez
 Maintainer: Gabriel439@gmail.com
 Stability: Experimental
 Bug-Reports: https://github.com/Gabriel439/Haskell-Pipes-ByteString-Library/issues
-Synopsis: ByteString support for the pipes ecosystem
+Synopsis: ByteString support for pipes
 Description: This library provides common utilities for working with bytestrings
 Category: Control, Pipe, Proxies
 Tested-With: GHC ==7.4.1
