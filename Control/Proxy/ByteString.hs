@@ -109,7 +109,7 @@ module Control.Proxy.ByteString (
 
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT)
-import Control.Monad.Trans.Writer.Strict (WriterT, tell)
+import Control.Monad.Trans.Writer.Lazy (WriterT, tell)
 import qualified Control.Proxy as P
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
