@@ -107,7 +107,6 @@ module Control.Proxy.ByteString (
     hGetSomeS_
     ) where
 
-import Control.Monad (forever)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT)
 import Control.Monad.Trans.Writer.Strict (WriterT, tell)
