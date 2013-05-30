@@ -749,7 +749,7 @@ hGetSomeS_ h = P.runIdentityK go where
 -- produce @n@ bytes, then everything it could produce is returned.
 drawBytes :: (Monad m, P.Proxy p)
     => Int
-    -> StateP [Maybe BS.ByteString] p
+    -> StateP [BS.ByteString] p
         () (Maybe BS.ByteString)
         b' b
         m BS.ByteString
@@ -774,7 +774,7 @@ drawBytes = loop id
 -- @skipBytes n@ skips @n@ bytes from upstream. If upstream does not respond
 -- @n@ bytes, then all responded bytes are skipped and this computation returns.
 passBytes :: (Monad m, P.Proxy p)
-    => Int -> StateP [Maybe BS.ByteString] p () (Maybe BS.ByteString) b' b m ()
+    => Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m ()
 passBytes = loop
   where
     loop remainder = when (remainder > 0) $ do
