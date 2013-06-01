@@ -277,7 +277,8 @@ foldlD' f = go where
         bs <- P.request x
         StateP (\s -> let s' = BS.foldl' f s bs
                       in  s' `seq` P.return_P ((), s'))
-        go =<< P.respond bs
+        x2 <- P.respond bs
+	go x2
 
 -- | Reduce the stream of bytes using a right fold
 foldrD
@@ -421,7 +422,7 @@ takeWhileD pred = P.runIdentityK go where
                 P.respond (BU.unsafeTake i bs)
                 return ()
 
--- | Drop bytes until they pass the predicate
+-- | Drop bytes until they fail the predicate
 dropWhileD
     :: (Monad m, P.Proxy p)
     => (Word8 -> Bool) -> () -> P.Pipe p BS.ByteString BS.ByteString m r
