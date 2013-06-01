@@ -107,14 +107,13 @@ module Control.Proxy.ByteString (
 
     -- * Parsers
     drawAllBytes,
-    drawBytesUpTo,
-    skipBytes
+    passBytesUpTo,
     ) where
 
-import Control.Monad (when)
+import Control.Monad (forever)
 import Control.Monad.Trans.Class (lift)
 import qualified Control.Proxy as P
-import Control.Proxy.Parse (draw, unDraw)
+import Control.Proxy.Parse (draw, unDraw, drawAll)
 import Control.Proxy.Trans.State (StateP(StateP))
 import Control.Proxy.Trans.Writer (WriterP, tell)
 import qualified Data.ByteString as BS
@@ -746,51 +745,34 @@ hGetSomeS_ h = P.runIdentityK go where
 -- | @drawAllBytes@ folds all input bytes into a single strict 'BS.ByteString'
 drawAllBytes
     :: (Monad m, P.Proxy p)
-    => StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m BS.ByteString
-drawAllBytes = go id
-  where
-    go diffBs = do
-        mbs <- draw
-	case mbs of
-	    Nothing -> return $ BS.concat (diffBs [])
-	    Just bs -> go (diffBs . (bs:))
+    => ()
+    -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m BS.ByteString
+drawAllBytes = fmap BS.concat . drawAll
 
 -- | @drawBytesUpTo n@ returns at-most @n@ bytes from upstream.
-drawBytesUpTo
+passBytesUpTo
     :: (Monad m, P.Proxy p)
     => Int
-    -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m BS.ByteString
-drawBytesUpTo = go id
+    -> ()
+    -> P.Pipe (StateP [BS.ByteString] p)
+        (Maybe BS.ByteString) (Maybe BS.ByteString) m r
+passBytesUpTo n0 = \() -> go n0
   where
-    go diffBs remainder
-        | remainder <= 0 = return $ BS.concat (diffBs [])
-        | otherwise = do
-            mbs <- draw
-            case mbs of
-                Nothing -> return $ BS.concat (diffBs [])
-                Just bs -> do
-                    let len = BS.length bs
-                    if len <= remainder
-                        then go (diffBs . (bs:)) (remainder - len)
-                        else do
-                            let (prefix, suffix) = BS.splitAt remainder bs
-                            unDraw suffix
-                            return $ BS.concat (diffBs [prefix])
-
-
--- @skipBytes n@ skips @n@ bytes from upstream. If upstream does not respond
--- @n@ bytes, then all responded bytes are skipped and this computation returns.
-skipBytes
-    :: (Monad m, P.Proxy p)
-    => Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m ()
-skipBytes = loop
-  where
-    loop remainder = when (remainder > 0) $ do
-        mbs <- draw
-        forM_ mbs $ \bs -> do
-            let len = BS.length bs
-            if len <= remainder
-                then loop (remainder - len)
-                else do
-                    let (_, suffix) = BS.splitAt remainder bs
-                    unDraw suffix
+    go n =
+        if (n <= 0)
+	then forever $ P.respond Nothing
+	else do
+	    mbs <- draw
+	    case mbs of
+	        Nothing -> forever $ P.respond Nothing
+		Just bs -> do
+		    let len = BS.length bs
+		    if (len <= n)
+		        then do
+			    P.respond (Just bs)
+			    go (n - len)
+			else do
+			    let (prefix, suffix) = BS.splitAt n bs
+			    unDraw suffix
+			    P.respond (Just prefix)
+			    forever $ P.respond Nothing
