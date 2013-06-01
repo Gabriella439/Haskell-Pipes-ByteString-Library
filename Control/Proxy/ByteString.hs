@@ -108,7 +108,7 @@ module Control.Proxy.ByteString (
 
     -- ** @pipes-parse@ functionality
     drawBytes,
-    passBytes
+    skipBytes
     ) where
 
 import Control.Monad (when)
@@ -782,10 +782,10 @@ drawBytes = loop id
 
 -- @skipBytes n@ skips @n@ bytes from upstream. If upstream does not respond
 -- @n@ bytes, then all responded bytes are skipped and this computation returns.
-passBytes
+skipBytes
     :: (Monad m, P.Proxy p)
     => Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m ()
-passBytes = loop
+skipBytes = loop
   where
     loop remainder = when (remainder > 0) $ do
         mbs <- draw
@@ -796,4 +796,3 @@ passBytes = loop
                 else do
                     let (_, suffix) = BS.splitAt remainder bs
                     unDraw suffix
-                    return ()
