@@ -2,9 +2,9 @@
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
     with both 'Handle's and lazy 'ByteString's.
 
-    To stream from 'Handle's, use 'readHandleS' or 'writeHandleD' to convert them
-    into the equivalent proxies.  For example, the following program copies data
-    from one file to another:
+    To stream from 'Handle's, use 'readHandleS' or 'writeHandleD' to convert
+    them into the equivalent proxies.  For example, the following program copies
+    data from one file to another:
 
 > import Control.Proxy
 > import Control.Proxy.ByteString
@@ -128,27 +128,36 @@ import Data.Word (Word8)
 import System.IO (Handle, hIsEOF, stdin, stdout)
 
 {-| Convert a lazy 'BL.ByteString' into a 'P.Producer' of strict
-    'BS.ByteString's -}
+    'BS.ByteString's
+
+> fromLazyS
+>  :: (Monad m, Proxy p)
+>  => Lazy.ByteString -> () -> Producer p Strict.ByteString m ()
+-}
 fromLazyS
- :: (Monad m, P.Proxy p)
- => BL.ByteString -> () -> P.Producer p BS.ByteString m ()
-fromLazyS bs () =
-    P.runIdentityP $ BLI.foldrChunks (\e a -> P.respond e >> a) (return ()) bs
+    :: (Monad m, P.Proxy p) => BL.ByteString -> r -> p x' x y' BS.ByteString m r
+fromLazyS bs r =
+    P.runIdentityP $ BLI.foldrChunks (\e a -> P.respond e >> a) (return r) bs
 
 {-| Fold strict 'BS.ByteString's flowing \'@D@\'ownstream into a lazy
     'BL.ByteString'.
 
     The fold generates a difference 'BL.ByteString' that you must apply to
-    'BS.empty'. -}
+    'BS.empty'.
+
+> toLazyD
+>     :: (Monad m, P.Proxy p)
+>     => () -> Pipe (WriterP (Endo Lazy.ByteString)) p Strict.ByteString Strict.ByteString m r
+-}
 toLazyD
- :: (Monad m, P.Proxy p)
- => x -> WriterP (M.Endo BL.ByteString) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP (M.Endo BL.ByteString) p x BS.ByteString x BS.ByteString m r
 toLazyD = P.foldrD BLI.Chunk
 
 -- | Store the 'M.First' 'Word8' that flows \'@D@\'ownstream
 headD
- :: (Monad m, P.Proxy p)
- => x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
 headD = P.foldD (\bs -> M.First $
     if (BS.null bs)
         then Nothing
@@ -158,8 +167,8 @@ headD = P.foldD (\bs -> M.First $
 
     Terminates after receiving a single 'Word8'. -}
 headD_
- :: (Monad m, P.Proxy p)
- => x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
 headD_ = go where
     go x = do
         bs <- P.request x
@@ -171,8 +180,8 @@ headD_ = go where
 
 -- | Store the 'M.Last' 'Word8' that flows \'@D@\'ownstream
 lastD
- :: (Monad m, P.Proxy p)
- => x -> WriterP (M.Last Word8) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP (M.Last Word8) p x BS.ByteString x BS.ByteString m r
 lastD = P.foldD (\bs -> M.Last $
     if (BS.null bs)
         then Nothing
@@ -215,16 +224,16 @@ initD = P.runIdentityK go0 where
 
 -- | Store whether 'M.All' received 'ByteString's are empty
 nullD
- :: (Monad m, P.Proxy p)
- => x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
 nullD = P.foldD (M.All . BS.null)
 
 {-| Store whether 'M.All' received 'ByteString's are empty
 
     'nullD_' terminates on the first non-empty 'ByteString'. -}
 nullD_
- :: (Monad m, P.Proxy p)
- => x -> WriterP M.All p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP M.All p x BS.ByteString x BS.ByteString m ()
 nullD_ = go where
     go x = do
         bs <- P.request x
@@ -236,19 +245,20 @@ nullD_ = go where
 
 -- | Store the length of all input flowing \'@D@\'ownstream
 lengthD
- :: (Monad m, P.Proxy p)
- => x -> WriterP (M.Sum Int) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => x -> WriterP (M.Sum Int) p x BS.ByteString x BS.ByteString m r
 lengthD = P.foldD (M.Sum . BS.length)
 
 -- | Apply a transformation to each 'Word8' in the stream
 mapD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Word8) -> x -> p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Word8) -> x -> p x BS.ByteString x BS.ByteString m r
 mapD f = P.mapD (BS.map f)
 
 -- | Intersperse a 'Word8' between each byte in the stream
 intersperseD
- :: (Monad m, P.Proxy p) => Word8 -> x -> p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8 -> x -> p x BS.ByteString x BS.ByteString m r
 intersperseD w8 = P.runIdentityK go0 where
     go0 x = do
         bs0 <- P.request x
@@ -261,8 +271,8 @@ intersperseD w8 = P.runIdentityK go0 where
 
 -- | Intercalate a 'BS.ByteString' between each chunk in the stream
 intercalateD
- :: (Monad m, P.Proxy p)
- => BS.ByteString -> x -> p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => BS.ByteString -> x -> p x BS.ByteString x BS.ByteString m r
 intercalateD bsi = P.runIdentityK go0 where
     go0 x = do
         bs <- P.request x
@@ -275,8 +285,8 @@ intercalateD bsi = P.runIdentityK go0 where
 
 -- | Reduce the stream of bytes using a strict left fold
 foldlD'
- :: (Monad m, P.Proxy p)
- => (s -> Word8 -> s) -> x -> StateP s p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (s -> Word8 -> s) -> x -> StateP s p x BS.ByteString x BS.ByteString m r
 foldlD' f = go where
     go x = do
         bs <- P.request x
@@ -286,31 +296,31 @@ foldlD' f = go where
 
 -- | Reduce the stream of bytes using a right fold
 foldrD
- :: (Monad m, P.Proxy p)
- => (Word8 -> w -> w)
- -> x -> WriterP (M.Endo w) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> w -> w)
+    -> x -> WriterP (M.Endo w) p x BS.ByteString x BS.ByteString m r
 foldrD f = P.foldrD (\e w -> BS.foldr f w e)
 
 -- | Map a function over the byte stream and concatenate the results
 concatMapD
- :: (Monad m, P.Proxy p)
- => (Word8 -> BS.ByteString) -> x -> p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> BS.ByteString) -> x -> p x BS.ByteString x BS.ByteString m r
 concatMapD f = P.mapD (BS.concatMap f)
 
 -- | Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
 anyD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m r
 anyD pred = P.foldD (M.Any . BS.any pred)
 
 {-| Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
 
     'anyD_' terminates on the first 'Word8' that satisfies the predicate. -}
 anyD_
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m ()
 anyD_ pred = go where
     go x = do
         bs <- P.request x
@@ -322,18 +332,18 @@ anyD_ pred = go where
 
 -- | Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
 allD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
 allD pred = P.foldD (M.All . BS.all pred)
 
 {-| Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
 
     'allD_' terminates on the first 'Word8' that fails the predicate. -}
 allD_
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m ()
 allD_ pred = go where
     go x = do
         bs <- P.request x
@@ -379,7 +389,8 @@ minimumD = P.foldD (\bs -> Minimum $
 
 -- | @(takeD n)@ only allows @n@ bytes to flow \'@D@\'ownstream
 takeD
- :: (Monad m, P.Proxy p) => Int64 -> x -> p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => Int64 -> x -> p x BS.ByteString x BS.ByteString m ()
 takeD n0 = P.runIdentityK (go n0) where
     go n
         | n <= 0 = \_ -> return ()
@@ -396,8 +407,8 @@ takeD n0 = P.runIdentityK (go n0) where
 
 -- | @(dropD n)@ drops the first @n@ bytes flowing \'@D@\'ownstream
 dropD
- :: (Monad m, P.Proxy p)
- => Int64 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Int64 -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 dropD n0 () = P.runIdentityP (go n0) where
     go n
         | n <= 0 = P.pull ()
@@ -412,8 +423,8 @@ dropD n0 () = P.runIdentityP (go n0) where
 
 -- | Take bytes until they fail the predicate
 takeWhileD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m ()
 takeWhileD pred = P.runIdentityK go where
     go x = do
         bs <- P.request x
@@ -427,8 +438,8 @@ takeWhileD pred = P.runIdentityK go where
 
 -- | Drop bytes until they pass the predicate
 dropWhileD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> () -> P.Pipe p BS.ByteString BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool) -> () -> P.Pipe p BS.ByteString BS.ByteString m r
 dropWhileD pred () = P.runIdentityP go where
     go = do
         bs <- P.request ()
@@ -440,16 +451,16 @@ dropWhileD pred () = P.runIdentityP go where
 
 -- | Group 'Nothing'-delimited streams of bytes into segments of equal bytes
 groupD
- :: (Monad m, P.Proxy p)
- => () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 groupD = groupByD (==)
 
 {-| Group 'Nothing'-delimited streams of bytes using the supplied equality
     function -}
 groupByD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Word8 -> Bool)
- -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Word8 -> Bool)
+    -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 groupByD eq () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
@@ -487,15 +498,15 @@ groupByD eq () = P.runIdentityP go1 where
 
 -- | Split 'Nothing'-delimited streams of bytes using the given 'Word8' boundary
 splitD
- :: (Monad m, P.Proxy p)
- => Word8 -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8 -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 splitD w8 = splitWithD (w8 ==)
 
 {-| Split 'Nothing'-delimited streams of bytes using the given predicate to
     define boundaries -}
 splitWithD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool) -> () -> P.Pipe p (Maybe BS.ByteString) BS.ByteString m r
 splitWithD pred () = P.runIdentityP go1 where
     go1 = do
         mbs <- P.request ()
@@ -522,16 +533,16 @@ splitWithD pred () = P.runIdentityP go1 where
 
 -- | Store whether 'M.Any' element in the byte stream matches the given 'Word8'
 elemD
- :: (Monad m, P.Proxy p)
- => Word8 -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8 -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m r
 elemD w8 = P.foldD (M.Any . BS.elem w8)
 
 {-| Store whether 'M.Any' element in the byte stream matches the given 'Word8'
 
     'elemD_' terminates once a single 'Word8' matches the predicate. -}
 elemD_
- :: (Monad m, P.Proxy p)
- => Word8 -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => Word8 -> x -> WriterP M.Any p x BS.ByteString x BS.ByteString m ()
 elemD_ w8 = go where
     go x = do
         bs <- P.request x
@@ -544,24 +555,24 @@ elemD_ w8 = go where
 {-| Store whether 'M.All' elements in the byte stream do not match the given
     'Word8' -}
 notElemD
- :: (Monad m, P.Proxy p)
- => Word8 -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8 -> x -> WriterP M.All p x BS.ByteString x BS.ByteString m r
 notElemD w8 = P.foldD (M.All . BS.notElem w8)
 
 -- | Store the 'M.First' element in the stream that matches the predicate
 findD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
 findD pred = P.foldD (M.First . BS.find pred)
 
 {-| Store the 'M.First' element in the stream that matches the predicate
 
     'findD_' terminates when a 'Word8' matches the predicate -}
 findD_
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
 findD_ pred = go where
     go x = do
         bs <- P.request x
@@ -573,15 +584,15 @@ findD_ pred = go where
 
 -- | Only allows 'Word8's to pass if they satisfy the predicate
 filterD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool) -> x -> p x BS.ByteString x BS.ByteString m r
 filterD pred = P.mapD (BS.filter pred)
 
 -- | Stores the element located at a given index, starting from 0
 indexD
- :: (Monad m, P.Proxy p)
- => Int64
- -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Int64
+    -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m r
 indexD n = go n where
     go n x = do
         bs <- P.request x
@@ -599,9 +610,9 @@ indexD n = go n where
 
     'indexD_' terminates once it reaches the given index. -}
 indexD_
- :: (Monad m, P.Proxy p)
- => Int64
- -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => Int64
+    -> x -> WriterP (M.First Word8) p x BS.ByteString x BS.ByteString m ()
 indexD_ n = go n where
     go n x = do
         bs <- P.request x
@@ -614,9 +625,9 @@ indexD_ n = go n where
 
 -- | Stores the 'M.First' index of an element that matches the given 'Word8'
 elemIndexD
- :: (Monad m, P.Proxy p)
- => Word8
- -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8
+    -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m r
 elemIndexD w8 = go 0 where
     go n x = do
         bs <- P.request x
@@ -633,9 +644,9 @@ elemIndexD w8 = go 0 where
 
     'elemIndexD_' terminates when it encounters a matching 'Word8' -}
 elemIndexD_
- :: (Monad m, P.Proxy p)
- => Word8
- -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => Word8
+    -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m ()
 elemIndexD_ w8 = go 0 where
     go n x = do
         bs <- P.request x
@@ -647,16 +658,16 @@ elemIndexD_ w8 = go 0 where
 
 -- | Store a list of all indices whose elements match the given 'Word8'
 elemIndicesD
- :: (Monad m, P.Proxy p)
- => Word8
- -> x -> WriterP [Int64] p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8
+    -> x -> WriterP [Int64] p x BS.ByteString x BS.ByteString m r
 elemIndicesD w8 = P.foldD (map fromIntegral . BS.elemIndices w8)
 
 -- | Store the 'M.First' index of an element that satisfies the predicate
 findIndexD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m r
 findIndexD pred = go 0 where
     go n x = do
         bs <- P.request x
@@ -673,9 +684,9 @@ findIndexD pred = go 0 where
 
     'findIndexD_' terminates when an element satisfies the predicate -}
 findIndexD_
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m ()
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP (M.First Int64) p x BS.ByteString x BS.ByteString m ()
 findIndexD_ pred = go 0 where
     go n x = do
         bs <- P.request x
@@ -687,9 +698,9 @@ findIndexD_ pred = go 0 where
 
 -- | Store a list of all indices whose elements satisfy the given predicate
 findIndicesD
- :: (Monad m, P.Proxy p)
- => (Word8 -> Bool)
- -> x -> WriterP [Int64] p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => (Word8 -> Bool)
+    -> x -> WriterP [Int64] p x BS.ByteString x BS.ByteString m r
 findIndicesD pred = go 0 where
     go n x = do
         bs <- P.request x
@@ -699,8 +710,8 @@ findIndicesD pred = go 0 where
 
 -- | Store a tally of how many elements match the given 'Word8'
 countD
- :: (Monad m, P.Proxy p)
- => Word8 -> x -> WriterP (M.Sum Int64) p x BS.ByteString x BS.ByteString m r
+    :: (Monad m, P.Proxy p)
+    => Word8 -> x -> WriterP (M.Sum Int64) p x BS.ByteString x BS.ByteString m r
 countD w8 = P.foldD (M.Sum . fromIntegral . BS.count w8)
 
 -- | Stream bytes from 'stdin'
@@ -717,12 +728,12 @@ readHandleS = hGetSomeS BLI.defaultChunkSize
 
 -- | Convert a byte stream into a 'Handle'
 writeHandleD
- :: (P.Proxy p) => Handle -> x -> p x BS.ByteString x BS.ByteString IO r
+    :: (P.Proxy p) => Handle -> x -> p x BS.ByteString x BS.ByteString IO r
 writeHandleD h = P.useD (BS.hPut h)
 
 -- | Convert a handle into a byte stream using a fixed chunk size
 hGetSomeS
- :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
+    :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
 hGetSomeS size h () = P.runIdentityP go where
     go = do
         eof <- lift $ hIsEOF h
@@ -747,12 +758,10 @@ hGetSomeS_ h = P.runIdentityK go where
 
 -- | @drawBytes n@ returns at-most @n@ bytes from upstream. If upstream cannot
 -- produce @n@ bytes, then everything it could produce is returned.
-drawBytes :: (Monad m, P.Proxy p)
+drawBytes
+    :: (Monad m, P.Proxy p)
     => Int
-    -> StateP [BS.ByteString] p
-        () (Maybe BS.ByteString)
-        b' b
-        m BS.ByteString
+    -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m BS.ByteString
 drawBytes = loop id
   where
     loop diffBs remainder
@@ -773,7 +782,8 @@ drawBytes = loop id
 
 -- @skipBytes n@ skips @n@ bytes from upstream. If upstream does not respond
 -- @n@ bytes, then all responded bytes are skipped and this computation returns.
-passBytes :: (Monad m, P.Proxy p)
+passBytes
+    :: (Monad m, P.Proxy p)
     => Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m ()
 passBytes = loop
   where
