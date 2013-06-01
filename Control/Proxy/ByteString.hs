@@ -2,7 +2,7 @@
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
     with both 'Handle's and lazy 'ByteString's.
 
-    To stream from 'Handle's, use 'fromHandleS' or 'toHandleD' to convert them
+    To stream from 'Handle's, use 'readHandleS' or 'writeHandleD' to convert them
     into the equivalent proxies.  For example, the following program copies data
     from one file to another:
 
@@ -12,7 +12,7 @@
 > main =
 >     withFile "inFile.txt"  ReadMode  $ \hIn  ->
 >     withFile "outFile.txt" WriteMode $ \hOut ->
->     runProxy $ fromHandleS hIn >-> toHandleD hOut
+>     runProxy $ readHandleS hIn >-> writeHandleD hOut
 
     You can also stream to and from 'stdin' and 'stdout' using the predefined
     'stdinS' and 'stdoutD' proxies, like in the following \"echo\" program:
@@ -101,8 +101,8 @@ module Control.Proxy.ByteString (
     stdoutD,
 
     -- ** I/O with Handles
-    fromHandleS,
-    toHandleD,
+    readHandleS,
+    writeHandleD,
     hGetSomeS,
     hGetSomeS_,
 
@@ -705,20 +705,20 @@ countD w8 = P.foldD (M.Sum . fromIntegral . BS.count w8)
 
 -- | Stream bytes from 'stdin'
 stdinS :: (P.Proxy p) => () -> P.Producer p BS.ByteString IO ()
-stdinS = fromHandleS stdin
+stdinS = readHandleS stdin
 
 -- | Stream bytes to 'stdout'
 stdoutD :: (P.Proxy p) => x -> p x BS.ByteString x BS.ByteString IO ()
-stdoutD = toHandleD stdout
+stdoutD = writeHandleD stdout
 
 -- | Convert a 'Handle' into a byte stream
-fromHandleS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
-fromHandleS = hGetSomeS BLI.defaultChunkSize
+readHandleS :: (P.Proxy p) => Handle -> () -> P.Producer p BS.ByteString IO ()
+readHandleS = hGetSomeS BLI.defaultChunkSize
 
 -- | Convert a byte stream into a 'Handle'
-toHandleD
+writeHandleD
  :: (P.Proxy p) => Handle -> x -> p x BS.ByteString x BS.ByteString IO r
-toHandleD h = P.useD (BS.hPut h)
+writeHandleD h = P.useD (BS.hPut h)
 
 -- | Convert a handle into a byte stream using a fixed chunk size
 hGetSomeS
