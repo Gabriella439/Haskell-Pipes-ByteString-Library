@@ -47,7 +47,6 @@ module Control.Proxy.ByteString (
     -- * Transforming ByteStrings
     mapD,
     intersperseD,
-    intercalateD,
 
     -- * Reducing ByteStrings (folds)
     foldlD',
@@ -106,7 +105,7 @@ module Control.Proxy.ByteString (
     hGetSomeS,
     hGetSomeS_,
 
-    -- ** @pipes-parse@ functionality
+    -- * Parsers
     drawBytes,
     skipBytes
     ) where
@@ -267,20 +266,6 @@ intersperseD w8 = P.runIdentityK go0 where
     go1 x = do
         bs <- P.request x
         x2 <- P.respond (BS.cons w8 (BS.intersperse w8 bs))
-        go1 x2
-
--- | Intercalate a 'BS.ByteString' between each chunk in the stream
-intercalateD
-    :: (Monad m, P.Proxy p)
-    => BS.ByteString -> x -> p x BS.ByteString x BS.ByteString m r
-intercalateD bsi = P.runIdentityK go0 where
-    go0 x = do
-        bs <- P.request x
-        x2 <- P.respond bs
-        go1 x2
-    go1 x = do
-        bs <- P.request x
-        x2 <- P.respond (BS.append bsi bs)
         go1 x2
 
 -- | Reduce the stream of bytes using a strict left fold
