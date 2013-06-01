@@ -106,7 +106,8 @@ module Control.Proxy.ByteString (
     hGetSomeS_,
 
     -- * Parsers
-    drawBytes,
+    drawAllBytes,
+    drawBytesUpTo,
     skipBytes
     ) where
 
@@ -742,15 +743,26 @@ hGetSomeS_ h = P.runIdentityK go where
                 size2 <- P.respond bs
                 go size2
 
--- | @drawBytes n@ returns at-most @n@ bytes from upstream. If upstream cannot
--- produce @n@ bytes, then everything it could produce is returned.
-drawBytes
+-- | @drawAllBytes@ folds all input bytes into a single strict 'BS.ByteString'
+drawAllBytes
+    :: (Monad m, P.Proxy p)
+    => StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m BS.ByteString
+drawAllBytes = go id
+  where
+    go diffBs = do
+        mbs <- draw
+	case mbs of
+	    Nothing -> return $ BS.concat (diffBs [])
+	    Just bs -> go (diffBs . (bs:))
+
+-- | @drawBytesUpTo n@ returns at-most @n@ bytes from upstream.
+drawBytesUpTo
     :: (Monad m, P.Proxy p)
     => Int
     -> StateP [BS.ByteString] p () (Maybe BS.ByteString) b' b m BS.ByteString
-drawBytes = loop id
+drawBytesUpTo = go id
   where
-    loop diffBs remainder
+    go diffBs remainder
         | remainder <= 0 = return $ BS.concat (diffBs [])
         | otherwise = do
             mbs <- draw
@@ -759,7 +771,7 @@ drawBytes = loop id
                 Just bs -> do
                     let len = BS.length bs
                     if len <= remainder
-                        then loop (diffBs . (bs:)) (remainder - len)
+                        then go (diffBs . (bs:)) (remainder - len)
                         else do
                             let (prefix, suffix) = BS.splitAt remainder bs
                             unDraw suffix
