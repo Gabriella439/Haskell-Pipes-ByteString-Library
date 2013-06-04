@@ -108,10 +108,13 @@ module Control.Proxy.ByteString (
     -- * Parsers
     drawAllBytes,
     passBytesUpTo,
+    drawBytesUpTo,
+    skipBytesUpTo
     ) where
 
 import Control.Monad (forever)
 import Control.Monad.Trans.Class (lift)
+import Control.Proxy ((>->))
 import qualified Control.Proxy as P
 import Control.Proxy.Parse (draw, unDraw, drawAll)
 import Control.Proxy.Trans.State (StateP(StateP))
@@ -742,14 +745,16 @@ hGetSomeS_ h = P.runIdentityK go where
                 size2 <- P.respond bs
                 go size2
 
--- | @drawAllBytes@ folds all input bytes into a single strict 'BS.ByteString'
+-- | @drawAllBytes@ folds all input bytes, both upstream and in the pushback
+-- buffer, into a single strict 'BS.ByteString'
 drawAllBytes
     :: (Monad m, P.Proxy p)
     => ()
     -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m BS.ByteString
 drawAllBytes = fmap BS.concat . drawAll
 
--- | @drawBytesUpTo n@ returns at-most @n@ bytes from upstream.
+-- | @passBytesUpTo n@ responds with at-most @n@ bytes from upstream and the
+-- pushback buffer.
 passBytesUpTo
     :: (Monad m, P.Proxy p)
     => Int
@@ -776,3 +781,16 @@ passBytesUpTo n0 = \() -> go n0
 			    unDraw suffix
 			    P.respond (Just prefix)
 			    forever $ P.respond Nothing
+
+-- Draw at most @n@ bytes from both upstream and the pushback buffer.
+drawBytesUpTo :: (Monad m, P.Proxy p) =>
+    Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m BS.ByteString
+drawBytesUpTo n = (passBytesUpTo n >-> const go) ()
+  where
+    go = P.request () >>= maybe (return BS.empty) (\x -> fmap (BS.append x) go)
+
+-- Skip at most @n@ bytes from both upstream and the pushback buffer.
+skipBytesUpTo :: (Monad m, P.Proxy p) =>
+    Int -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m ()
+skipBytesUpTo n = (passBytesUpTo n >-> const go) ()
+  where go = P.request () >>= maybe (return ()) (const go)
