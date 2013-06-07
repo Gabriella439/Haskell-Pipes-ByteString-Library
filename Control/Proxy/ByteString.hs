@@ -108,6 +108,7 @@ module Control.Proxy.ByteString (
     hGetS_,
 
     -- * Parsers
+    isEndOfBytes,
     drawAllBytes,
     passBytesUpTo,
     ) where
@@ -768,6 +769,23 @@ hGetS_ h = P.runIdentityK go where
                 bs <- lift $ BS.hGet h size
                 size2 <- P.respond bs
                 go size2
+
+
+-- | Like 'isEndOfInput', except it also consumes and ignores leading empty
+-- 'BS.ByteString' chunks.
+isEndOfBytes
+  :: (Monad m, P.Proxy p)
+  => StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m Bool
+isEndOfBytes = go where
+    go = do
+        ma <- draw
+        case ma of
+            Just a
+              | BS.null a -> go
+              | otherwise -> unDraw a >> return False
+            Nothing       -> return True
+{-# INLINABLE isEndOfBytes #-}
+
 
 -- | @drawAllBytes@ folds all input bytes into a single strict 'BS.ByteString'
 drawAllBytes
