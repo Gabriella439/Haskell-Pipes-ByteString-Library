@@ -111,6 +111,7 @@ module Control.Proxy.ByteString (
     isEndOfBytes,
     drawAllBytes,
     passBytesUpTo,
+    dropWhile
     ) where
 
 import Control.Monad (forever)
@@ -127,6 +128,7 @@ import Data.Foldable (forM_)
 import qualified Data.Monoid as M
 import Data.Int (Int64)
 import Data.Word (Word8)
+import Prelude hiding (dropWhile)
 import System.IO (Handle, hIsEOF, stdin, stdout)
 
 {-| Convert a lazy 'BL.ByteString' into a 'P.Producer' of strict
@@ -821,3 +823,19 @@ passBytesUpTo n0 = \() -> go n0
 			    unDraw suffix
 			    P.respond (Just prefix)
 			    forever $ P.respond Nothing
+
+-- | Consumes and discards leading bytes from upstream as long as the given
+-- predicate holds 'True'.
+dropWhile
+  :: (Monad m, P.Proxy p)
+  => (Word8 -> Bool)
+  -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m ()
+dropWhile pred = go where
+    go = do
+        ma <- draw
+        case ma of
+            Nothing -> return ()
+            Just a  ->
+                case BS.findIndex (not . pred) a of
+                    Nothing -> go
+                    Just i  -> unDraw (BU.unsafeDrop i a)
