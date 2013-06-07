@@ -108,8 +108,10 @@ module Control.Proxy.ByteString (
     hGetS_,
 
     -- * Parsers
+    isEndOfBytes,
     drawAllBytes,
     passBytesUpTo,
+    dropWhile
     ) where
 
 import Control.Monad (forever)
@@ -126,6 +128,7 @@ import Data.Foldable (forM_)
 import qualified Data.Monoid as M
 import Data.Int (Int64)
 import Data.Word (Word8)
+import Prelude hiding (dropWhile)
 import System.IO (Handle, hIsEOF, stdin, stdout)
 
 {-| Convert a lazy 'BL.ByteString' into a 'P.Producer' of strict
@@ -769,6 +772,23 @@ hGetS_ h = P.runIdentityK go where
                 size2 <- P.respond bs
                 go size2
 
+
+-- | Like 'isEndOfInput', except it also consumes and ignores leading empty
+-- 'BS.ByteString' chunks.
+isEndOfBytes
+  :: (Monad m, P.Proxy p)
+  => StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m Bool
+isEndOfBytes = go where
+    go = do
+        ma <- draw
+        case ma of
+            Just a
+              | BS.null a -> go
+              | otherwise -> unDraw a >> return False
+            Nothing       -> return True
+{-# INLINABLE isEndOfBytes #-}
+
+
 -- | @drawAllBytes@ folds all input bytes into a single strict 'BS.ByteString'
 drawAllBytes
     :: (Monad m, P.Proxy p)
@@ -803,3 +823,19 @@ passBytesUpTo n0 = \() -> go n0
 			    unDraw suffix
 			    P.respond (Just prefix)
 			    forever $ P.respond Nothing
+
+-- | Consumes and discards leading bytes from upstream as long as the given
+-- predicate holds 'True'.
+dropWhile
+  :: (Monad m, P.Proxy p)
+  => (Word8 -> Bool)
+  -> StateP [BS.ByteString] p () (Maybe BS.ByteString) y' y m ()
+dropWhile pred = go where
+    go = do
+        ma <- draw
+        case ma of
+            Nothing -> return ()
+            Just a  ->
+                case BS.findIndex (not . pred) a of
+                    Nothing -> go
+                    Just i  -> unDraw (BU.unsafeDrop i a)
