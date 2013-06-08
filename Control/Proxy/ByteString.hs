@@ -104,6 +104,8 @@ module Control.Proxy.ByteString (
     writeHandleD,
     hGetSomeS,
     hGetSomeS_,
+    hGetS,
+    hGetS_,
 
     -- * Parsers
     drawAllBytes,
@@ -742,6 +744,31 @@ hGetSomeS_ h = P.runIdentityK go where
             then return ()
             else do
                 bs <- lift $ BS.hGetSome h size
+                size2 <- P.respond bs
+                go size2
+
+-- | Convert a handle into a byte stream using a fixed chunk size
+hGetS
+    :: (P.Proxy p) => Int -> Handle -> () -> P.Producer p BS.ByteString IO ()
+hGetS size h () = P.runIdentityP go where
+    go = do
+        eof <- lift $ hIsEOF h
+        if eof
+            then return ()
+            else do
+                bs <- lift $ BS.hGet h size
+                P.respond bs
+                go
+
+-- | Convert a handle into a byte stream that serves variable chunk sizes
+hGetS_ :: (P.Proxy p) => Handle -> Int -> P.Server p Int BS.ByteString IO ()
+hGetS_ h = P.runIdentityK go where
+    go size = do
+        eof <- lift $ hIsEOF h
+        if eof
+            then return ()
+            else do
+                bs <- lift $ BS.hGet h size
                 size2 <- P.respond bs
                 go size2
 
