@@ -23,7 +23,7 @@ Library
         bytestring >= 0.9.2.1,
         transformers >= 0.2.0.0,
         medley
-        pipes >= 3.3.0,
+        pipes >= 4.0,
         pipes-parse >= 1.0.0
     Exposed-Modules:
         Pipes.ByteString
