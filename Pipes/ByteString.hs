@@ -35,7 +35,6 @@ module Pipes.ByteString (
     -- * Introducing and Eliminating ByteStrings
     fromLazy,
     toLazy,
-    toBuilder,
     
     -- * Basic Interface
     head,
@@ -180,22 +179,6 @@ toLazy
     => () -> Pipe BS.ByteString  BS.ByteString (WriterT (M.Endo BL.ByteString) m) ()
 toLazy = P.foldr BLI.Chunk
 
-{-| Fold strict 'BS.ByteString's flowing \'@D@\'ownstream into a
-    'Builder'.
-
-    The fold generates a difference 'BL.ByteString' that you must apply to
-    'BS.empty'.
-
--- toBuilder
---     :: (Monad m)
---     => () -> Pipe BS.ByteString BS.ByteString (WriterT Builder.Builder m) ()
--}
-
-
-toBuilder
-    :: (Monad m)
-    => () -> Pipe BS.ByteString BS.ByteString (WriterT Builder.Builder m) ()
-toBuilder = P.fold (Builder.byteString)
 
 -- | Store the 'M.First' 'Word8' that flows \'@D@\'ownstream
 -- headD
