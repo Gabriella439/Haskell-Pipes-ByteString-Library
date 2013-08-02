@@ -1,4 +1,4 @@
-{-#LANGUAGE RankNTypes#-}
+{-# LANGUAGE RankNTypes #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
@@ -32,6 +32,7 @@
 -}
 
 module Pipes.ByteString (
+{-
     -- * Introducing and Eliminating ByteStrings
     fromLazy,
     toLazy,
@@ -105,20 +106,19 @@ module Pipes.ByteString (
     passBytesUpTo,
     drawBytesUpTo,
     skipBytesUpTo
+-}
     ) where
 
-import Control.Monad (forever)
+import Control.Monad
 import Control.Monad.Trans.Class (lift)
 import Pipes
-import qualified Pipes as P
 import qualified Pipes.Prelude as P
 import Pipes.Lift
-import Pipes.Parse (draw, unDraw, drawAll, passUpTo, Draw(..), Sink, Conduit)
+import Pipes.Parse
 import Control.Monad.Trans.State.Strict (StateT(StateT))
 import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Builder as Builder
 import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
 import Data.Foldable (forM_)
@@ -129,12 +129,12 @@ import System.IO (Handle, hIsEOF)
 import qualified System.IO as IO
 import qualified Data.List as List
 import Prelude hiding (
+    splitAt,
     head,
     tail,
     last,
     length,
     map,
-    foldl',
     foldr,
     init,
     concatMap,
@@ -153,16 +153,11 @@ import Prelude hiding (
 {-| Convert a lazy 'BL.ByteString' into a 'P.Producer' of strict
     'BS.ByteString's
 
-> fromLazyS
->  :: (Monad m, Proxy p)
->  => Lazy.ByteString -> () -> Producer p Strict.ByteString m ()
 -}
-fromLazy
-    :: (Monad m)
-    => BL.ByteString -> () -> Producer BS.ByteString m ()
-fromLazy bs r =
-   BLI.foldrChunks (\e a -> P.respond e >> a) (return r) bs
+fromLazy :: (Monad m) => BL.ByteString -> Producer BS.ByteString m ()
+fromLazy bs = BLI.foldrChunks (\e a -> yield e >> a) (return ()) bs
 
+{-
 {-| Fold strict 'BS.ByteString's flowing \'@D@\'ownstream into a lazy
     'BL.ByteString'.
 
@@ -817,13 +812,6 @@ hGet_ h = go where
                 size2 <- P.respond bs
                 go size2
 
--- | @drawAllBytes@ folds all input bytes, both upstream and in the pushback
--- buffer, into a single strict 'BS.ByteString'
-drawAllBytes
-    :: (Monad m)
-    => () -> Sink BS.ByteString (StateT [BS.ByteString] m) BS.ByteString
-drawAllBytes = fmap BS.concat . drawAll
-
 -- | @passBytesUpTo n@ responds with at-most @n@ bytes from upstream and the
 -- pushback buffer.
 passBytesUpTo
@@ -867,6 +855,53 @@ skipBytesUpTo
      -> Draw -> Sink BS.ByteString (StateT [BS.ByteString] m) ()
 skipBytesUpTo n = passBytesUpTo n >-> const go
   where go = draw >>= maybe (return ()) (const go)
+-}
 
+takeWhile'
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Pipe BS.ByteString BS.ByteString
+        (StateT (Producer BS.ByteString m r) m) ()
+takeWhile' predicate = loop
+  where
+    loop = do
+        bs <- await
+        let (prefix, suffix) = BS.span predicate prefix
+        yield prefix
+        if (BS.null suffix) then loop else lift (unDraw suffix)
 
+spans
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Iso' (Producer BS.ByteString m r)
+            (Producer BS.ByteString m (Producer BS.ByteString m r))
+spans predicate = iso (splitUsing (takeWhile' predicate)) join
 
+splitAt
+    :: (Monad m)
+    => Int64
+    -> Pipe BS.ByteString BS.ByteString
+        (StateT (Producer BS.ByteString m r) m) ()
+splitAt = loop
+  where
+    loop n =
+        if (n <= 0)
+        then return ()
+        else do
+            bs <- await
+            let len = fromIntegral (BS.length bs)
+            if (n < len)
+            then do
+                let (prefix, suffix) = BS.splitAt (fromIntegral n) bs
+                yield prefix
+                lift (unDraw suffix)
+            else do
+                yield bs
+                loop (n - len)
+
+splitsAt
+    :: (Monad m)
+    => Int64
+    -> Iso' (Producer BS.ByteString m r)
+            (Producer BS.ByteString m (Producer BS.ByteString m r))
+splitsAt n = iso (splitUsing (splitAt n)) join
