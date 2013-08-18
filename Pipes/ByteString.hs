@@ -1,4 +1,5 @@
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE DoAndIfThenElse #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
