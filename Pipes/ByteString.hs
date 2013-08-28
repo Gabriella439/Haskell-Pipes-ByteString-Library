@@ -39,18 +39,14 @@ module Pipes.ByteString (
     -- * Basic Interface
     head,
     last,
-    tail,
-    init,
     null,
     length,
     
     -- * Transforming ByteStrings
     map,
-    intersperse,
     
     -- * Reducing ByteStrings (folds)
-    foldl',
-    foldr,
+    fold,
     
     -- ** Special folds
     concatMap,
@@ -63,12 +59,6 @@ module Pipes.ByteString (
     drop,
     takeWhile,
     dropWhile,
-    group,
-    groupBy,
-    
-    -- ** Breaking into many substrings
-    split,
-    splitWith,
     
     -- * Searching ByteStrings
     -- ** Searching by equality
@@ -93,18 +83,19 @@ module Pipes.ByteString (
     stdout,
     
     -- ** I/O with Handles
-    readHandle,
-    writeHandle,
+    fromHandle,
+    toHandle,
     hGetSome,
-    hGetSome_,
+    hGetSomeN,
     hGet,
-    hGet_,
+    hGetN
     ) where
 
-import Control.Monad (forever)
+import Control.Monad (liftM)
 import Control.Monad.Trans.Class (lift)
+import Data.Functor.Identity (Identity)
 import Pipes
-import qualified Pipes as P
+import Pipes.Core (respond, Server)
 import qualified Pipes.Prelude as P
 import Pipes.Lift
 import Control.Monad.Trans.State.Strict (StateT(StateT))
@@ -115,7 +106,6 @@ import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
 import Data.Foldable (forM_)
 import qualified Data.Monoid as M
-import Data.Int (Int64)
 import Data.Word (Word8)
 import System.IO (Handle, hIsEOF)
 import qualified System.IO as IO
@@ -141,647 +131,314 @@ import Prelude hiding (
     null)
 
 
-{-| Convert a lazy 'BL.ByteString' into a 'P.Producer' of strict
-    'BS.ByteString's
+-- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
+fromLazy :: (Monad m) => BL.ByteString -> Producer BS.ByteString m ()
+fromLazy bs =
+   BLI.foldrChunks (\e a -> yield e >> a) (return ()) bs
+{-# INLINABLE fromLazy #-}
 
-> fromLazyS
->  :: (Monad m, Proxy p)
->  => Lazy.ByteString -> () -> Producer p Strict.ByteString m ()
+{-| Fold a pure 'Producer' of strict 'BS.ByteString's into a lazy
+    'BL.ByteString'
 -}
-fromLazy
-    :: (Monad m)
-    => BL.ByteString -> () -> Producer BS.ByteString m ()
-fromLazy bs r =
-   BLI.foldrChunks (\e a -> P.respond e >> a) (return r) bs
+toLazy :: Producer BS.ByteString Identity () -> BL.ByteString
+toLazy = BL.fromChunks . P.toList
+{-# INLINABLE toLazy #-}
 
-{-| Fold strict 'BS.ByteString's flowing \'@D@\'ownstream into a lazy
-    'BL.ByteString'.
+{-| Fold an effectful 'Producer' of strict 'BS.ByteString's into a lazy
+    'BL.ByteString'
 
-    The fold generates a difference 'BL.ByteString' that you must apply to
-    'BS.empty'.
-
-> toLazyD
->     :: (Monad m, P.Proxy p)
->     => () -> Pipe (WriterP (Endo Lazy.ByteString)) p Strict.ByteString Strict.ByteString m r
+    Note: 'toLazyM' is not an idiomatic use of @pipes@, but I provide it for
+    simple testing purposes.  Idiomatic @pipes@ style consumes the chunks
+    immediately as they are generated instead of loading them all into memory.
 -}
+toLazyM :: (Monad m) => Producer BS.ByteString m () -> m BL.ByteString
+toLazyM = liftM BL.fromChunks . P.toListM
+{-# INLINABLE toLazyM #-}
 
-toLazy
-    :: (Monad m)
-    => () -> Pipe BS.ByteString  BS.ByteString (WriterT (M.Endo BL.ByteString) m) ()
-toLazy = P.foldr BLI.Chunk
+-- | Retrieve the first 'Word8'
+head :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
+head = go 
+  where
+    go p = do
+        x <- next p
+        case x of
+            Left   ()      -> return Nothing
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go p'
+                else return $ Just (BU.unsafeHead bs)
+{-# INLINABLE head #-}
 
+-- | Retrieve the last 'Word8'
+last :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
+last = go Nothing
+  where
+    go r p = do
+        x <- next p
+        case x of
+            Left   ()      -> return r
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go r p'
+                else go (Just $ BS.last bs) p'
+                -- TODO: Change this to 'unsafeLast' when bytestring-0.10.2.0
+                --       becomes more widespread
+{-# INLINABLE last #-}
 
--- | Store the 'M.First' 'Word8' that flows \'@D@\'ownstream
--- headD
---     :: (Monad m)
---     => x ->  Proxy x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) r
+-- | Determine if the stream is empty
+null :: (Monad m) => Producer BS.ByteString m () -> m Bool
+null = P.all BS.null
+{-# INLINABLE null #-}
 
-head
-  :: Monad m =>
-     () -> Consumer BS.ByteString (WriterT (M.First Word8) m) r
-head = P.fold (\bs -> M.First $
-    if (BS.null bs)
-        then Nothing
-        else Just $ BU.unsafeHead bs )
-
-{-| Store the 'M.First' 'Word8' that flows \'@D@\'ownstream
-
-    Terminates after receiving a single 'Word8'. -}
--- headD_
---     :: (Monad m)
---     => x ->  Proxy x BS.ByteString x BS.ByteString (WriterT (M.First Word8) m) ()
--- headD_ = go where
---     go x = do
---         bs <- P.request x
---         if (BS.null bs)
---             then do
---                 x2 <- P.respond bs
---                 go x2
---             else lift . tell . M.First . Just $ BU.unsafeHead bs
-
-
--- | Store the 'M.Last' 'Word8' that flows \'@D@\'ownstream
-last
-    :: Monad m
-    => () -> Consumer BS.ByteString  (WriterT (M.Last Word8) m) r
-last = P.fold (\bs -> M.Last $
-    if (BS.null bs)
-        then Nothing
-        else Just $ BS.last bs )
-
--- | Drop the first byte in the stream
-tail :: Monad m => () -> Pipe BS.ByteString BS.ByteString m b
-tail = go where
-    go x = do
-        bs <- P.request x
-        if (BS.null bs)
-            then do
-                x2 <- P.respond bs
-                go x2
-            else do
-                x2 <- P.respond (BU.unsafeTail bs)
-                P.pull x2
-
--- | Store whether 'M.All' received 'ByteString's are empty
-null
-  :: Monad m
-  => () -> Consumer BS.ByteString (WriterT M.All m) r
-null = P.fold (M.All . BS.null)
-
-
-{-| Store whether 'M.All' received 'ByteString's are empty
-
-    'nullD_' terminates on the first non-empty 'ByteString'. -}
--- nullD_
---     :: Monad m
---     => a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT M.All m) ()
--- nullD_ = go where
---     go x = do
---         bs <- P.request x
---         if (BS.null bs)
---             then do
---                 x2 <- P.respond bs
---                 go x2
---             else lift $ tell (M.All False)
-
-
-
--- | Store the length of all input flowing \'@D@\'ownstream
-length
-    :: Monad m
-    =>  () -> Consumer BS.ByteString (WriterT (M.Sum Int) m) r
-length = P.fold (M.Sum . BS.length)
+-- | Count the number of bytes
+length :: (Monad m, Num a) => Producer BS.ByteString m () -> m a
+length = P.fold (\n bs -> n + fromIntegral (BS.length bs)) 0 id
+{-# INLINABLE length #-}
 
 -- | Apply a transformation to each 'Word8' in the stream
-map
-    :: Monad m
-    => (Word8 -> Word8) -> () -> Pipe BS.ByteString BS.ByteString m r
+map :: (Monad m) => (Word8 -> Word8) -> Pipe BS.ByteString BS.ByteString m r
 map f = P.map (BS.map f)
-
--- | Intersperse a 'Word8' between each byte in the stream
-intersperse
-    :: Monad m
-    => Word8 -> () -> Pipe BS.ByteString BS.ByteString m r
-intersperse w8 = go0 where
-    go0 x = do
-        bs0 <- P.request x
-        x2  <- P.respond (BS.intersperse w8 bs0)
-        go1 x2
-    go1 x = do
-        bs <- P.request x
-        x2 <- P.respond (BS.cons w8 (BS.intersperse w8 bs))
-        go1 x2
+{-# INLINABLE map #-}
 
 -- | Reduce the stream of bytes using a strict left fold
-foldl'
+fold
     :: Monad m
-    => (s -> Word8 -> s)
-    -> () -> Consumer BS.ByteString (StateT s m) r
-foldl' f () = go where
-    go  = do
-        bs <- P.request ()
-        lift $ StateT (\s -> let s' = BS.foldl' f s bs
-                             in  s' `seq` return ((), s'))
-        go
-   --    x2 <- P.respond bs
-
-
--- | Reduce the stream of bytes using a right fold
-foldr
-    :: Monad m
-    => (Word8 -> s -> s)
-    -> () -> Consumer BS.ByteString (WriterT (M.Endo s) m) r
-foldr f = P.foldr (\e w -> BS.foldr f w e)
+    => (x -> Word8 -> x) -> x -> (x -> r) -> Producer BS.ByteString m () -> m r
+fold step begin done = P.fold (\x bs -> BS.foldl' step x bs) begin done
+{-# INLINABLE fold #-}
 
 -- | Map a function over the byte stream and concatenate the results
 concatMap
-    :: Monad m
-    => (Word8 -> BS.ByteString)
-    -> () -> Pipe BS.ByteString BS.ByteString m r
+    :: (Monad m)
+    => (Word8 -> BS.ByteString) -> Pipe BS.ByteString BS.ByteString m r
 concatMap f = P.map (BS.concatMap f)
-
+{-# INLINABLE concatMap #-}
 
 -- | Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
-any
-    :: Monad m
-    => (Word8 -> Bool)
-    -> () -> Consumer BS.ByteString (WriterT M.Any m) r
-any pred = P.fold (M.Any . BS.any pred)
-
--- {-| Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
---
---     'anyD_' terminates on the first 'Word8' that satisfies the predicate. -}
--- anyD_
---     :: Monad m
---     => (Word8 -> Bool)
---     -> a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT M.Any m) ()
--- anyD_ pred = go where
---     go x = do
---         bs <- P.request x
---         if (BS.any pred bs)
---             then lift $ tell (M.Any True)
---             else do
---                 x2 <- P.respond bs
---                 go x2
+any :: (Monad m) => (Word8 -> Bool) -> Producer BS.ByteString m () -> m Bool
+any pred = P.any (BS.any pred)
+{-# INLINABLE any #-}
 
 -- | Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
-all
-    :: Monad m
-    => (Word8 -> Bool)
-    -> () -> Consumer BS.ByteString (WriterT M.All m) r
-all pred = P.fold (M.All . BS.all pred)
+all :: (Monad m) => (Word8 -> Bool) -> Producer BS.ByteString m () -> m Bool
+all pred = P.all (BS.all pred)
+{-# INLINABLE all #-}
 
--- {-| Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
---
---     'allD_' terminates on the first 'Word8' that fails the predicate. -}
--- allD_
---     :: Monad m
---     => (Word8 -> Bool)
---     -> a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT M.All m) ()
--- allD_ pred = go where
---     go x = do
---         bs <- P.request x
---         if (BS.all pred bs)
---             then do
---                 x2 <- P.respond bs
---                 go x2
---             else lift $ tell (M.All False)
+-- | Return the maximum 'Word8' within a byte stream
+maximum :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
+maximum = P.fold step Nothing id
+  where
+    step mw8 bs =
+        if (BS.null bs)
+        then mw8
+        else case mw8 of
+            Nothing -> Just (BS.maximum bs)
+            Just w8 -> Just (max w8 (BS.maximum bs))
+{-# INLINABLE maximum #-}
 
-{-
-newtype Maximum a = Maximum { getMaximum :: Maybe a }
+-- | Return the minimum 'Word8' within a byte stream
+minimum :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
+minimum = P.fold step Nothing id
+  where
+    step mw8 bs =
+        if (BS.null bs)
+        then mw8
+        else case mw8 of
+            Nothing -> Just (BS.minimum bs)
+            Just w8 -> Just (min w8 (BS.minimum bs))
+{-# INLINABLE minimum #-}
 
-instance (Ord a) => Monoid (Maximum a) where
-    mempty = Maximum Nothing
-    mappend m1 (Maximum Nothing) = m1
-    mappend (Maximum Nothing) m2 = m2
-    mappend (Maximum (Just a1)) (Maximum (Just a2)) = Maximum (Just (max a1 a2))
-
-maximumD
- :: (Monad m, P.Proxy p)
- => x -> p x BS.ByteString x BS.ByteString (WriterT (Maximum Word8) m) r
-maximumD = P.foldD (\bs -> Maximum $
-    if (BS.null bs)
-        then Nothing
-        else Just $ BS.maximum bs )
-
-newtype Minimum a = Minimum { getMinimum :: Maybe a }
-
-instance (Ord a) => Monoid (Minimum a) where
-    mempty = Minimum Nothing
-    mappend m1 (Minimum Nothing) = m1
-    mappend (Minimum Nothing) m2 = m2
-    mappend (Minimum (Just a1)) (Minimum (Just a2)) = Minimum (Just (min a1 a2))
-
-minimumD
- :: (Monad m, P.Proxy p)
- => x -> p x BS.ByteString x BS.ByteString (WriterT (Minimum Word8) m) r
-minimumD = P.foldD (\bs -> Minimum $
-    if (BS.null bs)
-        then Nothing
-        else Just $ BS.minimum bs )
--}
-
--- | @(takeD n)@ only allows @n@ bytes to flow \'@D@\'ownstream
-take
-    :: (Monad m)
-    => Int64 -> () -> Pipe BS.ByteString BS.ByteString m ()
+-- | @(take n)@ only allows @n@ bytes to pass
+take :: (Monad m, Integral a) => a -> Pipe BS.ByteString BS.ByteString m ()
 take n0 = go n0 where
     go n
-        | n <= 0 = \_ -> return ()
-        | otherwise = \x -> do
-            bs <- P.request x
+        | n <= 0    = return ()
+        | otherwise = do
+            bs <- await
             let len = fromIntegral $ BS.length bs
             if (len > n)
-                then do
-                    P.respond (BU.unsafeTake (fromIntegral n) bs)
-                    return ()
+                then yield (BU.unsafeTake (fromIntegral n) bs)
                 else do
-                    x2 <- P.respond bs
-                    go (n - len) x2
+                    yield bs
+                    go (n - len)
+{-# INLINABLE take #-}
 
--- | @(dropD n)@ drops the first @n@ bytes flowing \'@D@\'ownstream
-drop
-    :: (Monad m)
-    => Int64 -> () -> Pipe BS.ByteString BS.ByteString m r
-drop n0 () = go n0 where
+-- | @(dropD n)@ drops the first @n@ bytes
+drop :: (Monad m, Integral a) => a -> Pipe BS.ByteString BS.ByteString m r
+drop n0 = go n0 where
     go n
-        | n <= 0 = P.pull ()
+        | n <= 0    = cat
         | otherwise = do
-            bs <- P.request ()
-            let len = fromIntegral $ BS.length bs
+            bs <- await
+            let len = fromIntegral (BS.length bs)
             if (len >= n)
                 then do
-                    P.respond (BU.unsafeDrop (fromIntegral n) bs)
-                    P.pull ()
+                    yield (BU.unsafeDrop (fromIntegral n) bs)
+                    cat
                 else go (n - len)
+{-# INLINABLE drop #-}
 
 -- | Take bytes until they fail the predicate
 takeWhile
-    :: Monad m
-    => (Word8 -> Bool) -> () -> Pipe BS.ByteString BS.ByteString m ()
-takeWhile pred = go where
-    go x = do
-        bs <- P.request x
-        case BS.findIndex (not . pred) bs of
+    :: (Monad m) => (Word8 -> Bool) -> Pipe BS.ByteString BS.ByteString m ()
+takeWhile predicate = go where
+    go = do
+        bs <- await
+        case BS.findIndex (not . predicate) bs of
             Nothing -> do
-                x2 <- P.respond bs
-                go x2
-            Just i -> do
-                P.respond (BU.unsafeTake i bs)
-                return ()
+                yield bs
+                go
+            Just i -> yield (BU.unsafeTake i bs)
+{-# INLINABLE takeWhile #-}
 
 -- | Drop bytes until they fail the predicate
 dropWhile
-    :: (Monad m)
-    => (Word8 -> Bool) -> () -> P.Pipe BS.ByteString BS.ByteString m r
-dropWhile pred () = go where
+    :: (Monad m) => (Word8 -> Bool) -> Pipe BS.ByteString BS.ByteString m r
+dropWhile predicate = go where
     go = do
-        bs <- P.request ()
-        case BS.findIndex (not . pred) bs of
+        bs <- await
+        case BS.findIndex (not . predicate) bs of
             Nothing -> go
             Just i -> do
-                P.respond (BU.unsafeDrop i bs)
-                P.pull ()
+                yield (BU.unsafeDrop i bs)
+                cat
+{-# INLINABLE dropWhile #-}
 
--- | Group 'Nothing'-delimited streams of bytes into segments of equal bytes
-group
-    :: (Monad m)
-     => () -> P.Pipe (Maybe BS.ByteString) BS.ByteString m r
-group = groupBy (==)
+-- | Determine whether any element in the byte stream matches the given 'Word8'
+elem :: (Monad m) => Word8 -> Producer BS.ByteString m () -> m Bool
+elem w8 = P.any (BS.elem w8)
+{-# INLINABLE elem #-}
 
-{-| Group 'Nothing'-delimited streams of bytes using the supplied equality
-    function -}
-groupBy
-    :: (Monad m)
-    => (Word8 -> Word8 -> Bool)
-    -> () -> P.Pipe (Maybe BS.ByteString) BS.ByteString m r
-groupBy eq () = go1 where
-    go1 = do
-        mbs <- P.request ()
-        case mbs of
-            Nothing -> go1
-            Just bs
-                | BS.null bs -> go1
-                | otherwise -> do
-                    let groups = BS.groupBy eq bs
-                    mapM_ P.respond (List.init groups)
-                    go2 (List.last groups)
-    go2 group0 = do
-        mbs <- P.request ()
-        case mbs of
-            Nothing -> do
-                P.respond group0
-                go1
-            Just bs
-                | BS.null bs -> go2 group0
-                | otherwise -> do
-                    let groups = BS.groupBy eq bs
-                    case groups of
-                        []              -> go2 group0
-                        [group1]        -> go2 (BS.append group0 group1)
-                        gs@(group1:gs') -> do
-                            if (BS.head group0 == BS.head group1)
-                                then do
-                                    P.respond (BS.append group0 group1)
-                                    mapM_ P.respond (List.init gs')
-                                    go2 (List.last gs')
-                                else do
-                                    P.respond group0
-                                    mapM_ P.respond (List.init gs )
-                                    go2 (List.last gs )
-
--- | Split 'Nothing'-delimited streams of bytes using the given 'Word8' boundary
-split
-    :: (Monad m)
-    => Word8 -> () -> P.Pipe (Maybe BS.ByteString) BS.ByteString m r
-split w8 = splitWith (w8 ==)
-
-{-| Split 'Nothing'-delimited streams of bytes using the given predicate to
-    define boundaries -}
-splitWith
-    :: (Monad m)
-    => (Word8 -> Bool) -> () -> P.Pipe (Maybe BS.ByteString) BS.ByteString m r
-splitWith pred () = go1 where
-    go1 = do
-        mbs <- P.request ()
-        case mbs of
-            Nothing -> go1
-            Just bs -> case BS.splitWith pred bs of
-                [] -> go1
-                gs -> do
-                    mapM_ P.respond (List.init gs)
-                    go2 (List.last gs)
-    go2 group0 = do
-        mbs <- P.request ()
-        case mbs of
-            Nothing -> do
-                P.respond group0
-                go1
-            Just bs -> case BS.splitWith pred bs of
-                []        -> go2 group0
-                [group1]  -> go2 (BS.append group0 group1)
-                group1:gs -> do
-                    P.respond (BS.append group0 group1)
-                    mapM_ P.respond (List.init gs)
-                    go2 (List.last gs)
-
--- | Store whether 'M.Any' element in the byte stream matches the given 'Word8'
-elem
-    :: Monad m
-    => Word8 -> () -> Consumer BS.ByteString (WriterT M.Any m) r
-elem w8 = P.fold (M.Any . BS.elem w8)
-
--- {-| Store whether 'M.Any' element in the byte stream matches the given 'Word8'
---
---     'elemD_' terminates once a single 'Word8' matches the predicate. -}
--- elemD_
---     :: Monad m
---     => Word8
---     -> a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT M.Any m) ()
--- elemD_ w8 = go where
---     go x = do
---         bs <- P.request x
---         if (BS.elem w8 bs)
---             then lift $ tell (M.Any True)
---             else do
---                 x2 <- P.respond bs
---                 go x2
-
-{-| Store whether 'M.All' elements in the byte stream do not match the given
-    'Word8' -}
+{-| Determine whether all elements in the byte stream do not match the given
+    'Word8'
+-}
 notElem
-    :: Monad m
-    => Word8 -> () -> Consumer BS.ByteString (WriterT M.All m) r
-notElem w8 = P.fold (M.All . BS.notElem w8)
+    :: (Monad m) => Word8 -> Producer BS.ByteString m () -> m Bool
+notElem w8 = P.all (BS.notElem w8)
+{-# INLINABLE notElem #-}
 
--- | Store the 'M.First' element in the stream that matches the predicate
+-- | Find the first element in the stream that matches the predicate
 find
-    :: Monad m
-    => (Word8 -> Bool)
-     -> () -> Consumer BS.ByteString (WriterT (M.First Word8) m) r
-find pred = P.fold (M.First . BS.find pred)
-
--- {-| Store the 'M.First' element in the stream that matches the predicate
---
---     'findD_' terminates when a 'Word8' matches the predicate -}
--- findD_
---       :: Monad m
---       => (Word8 -> Bool)
---       -> a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT (M.First Word8) m) ()
--- findD_ pred = go where
---     go x = do
---         bs <- P.request x
---         case BS.find pred bs of
---             Nothing -> do
---                 x2 <- P.respond bs
---                 go x2
---             Just w8 -> lift . tell . M.First $ Just w8
+    :: (Monad m)
+    => (Word8 -> Bool) -> Producer BS.ByteString m () -> m (Maybe Word8)
+find predicate p = head (p >-> filter predicate)
+{-# INLINABLE find #-}
 
 -- | Only allows 'Word8's to pass if they satisfy the predicate
-filter
-    :: Monad m
-    => (Word8 -> Bool) -> () -> Pipe BS.ByteString BS.ByteString m r
+filter :: (Monad m) => (Word8 -> Bool) -> Pipe BS.ByteString BS.ByteString m r
 filter pred = P.map (BS.filter pred)
+{-# INLINABLE filter #-}
 
--- | Stores the element located at a given index, starting from 0
+-- | Index into a byte stream
 index
-      :: (Monad m)
-      => Int64
-      -> () -> Pipe BS.ByteString BS.ByteString (WriterT (M.First Word8) m) r
-index n = go n where
-    go n x = do
-        bs <- P.request x
-        let len = fromIntegral $ BS.length bs
-        if (len <= n)
-            then do
-                x2 <- P.respond bs
-                go (n - len) x2
-            else do
-                lift . tell . M.First . Just . BS.index bs $ fromIntegral n
-                x2 <- P.respond bs
-                P.pull x2
+    :: (Monad m, Integral a)
+    => a-> Producer BS.ByteString m () -> m (Maybe Word8)
+index n p = head (p >-> drop n)
+{-# INLINABLE index #-}
 
-{-- -| Stores the element located at a given index, starting from 0
---
---     'indexD_' terminates once it reaches the given index. -}
--- indexD_
---     :: (Monad m)
---     => Int64
---     -> a' -> Proxy a' BS.ByteString a' BS.ByteString (WriterT (M.First Word8) m) ()
--- indexD_ n = go n where
---     go n x = do
---         bs <- P.request x
---         let len = fromIntegral $ BS.length bs
---         if (len <= n)
---             then do
---                 x2 <- P.respond bs
---                 go (n - len) x2
---             else lift . tell . M.First . Just . BS.index bs $ fromIntegral n
-
--- | Stores the 'M.First' index of an element that matches the given 'Word8'
+-- | Find the index of an element that matches the given 'Word8'
 elemIndex
-    :: (Monad m)
-    => Word8
-    -> () -> Pipe BS.ByteString BS.ByteString (WriterT (M.First Int64) m) r
-elemIndex w8 = go 0 where
-    go n x = do
-        bs <- P.request x
-        case BS.elemIndex w8 bs of
-            Nothing -> do
-                x2 <- P.respond bs
-                go (n + fromIntegral (BS.length bs)) x2
-            Just i  -> do
-                lift . tell . M.First . Just $ n + fromIntegral i
-                x2 <- P.respond bs
-                P.pull x2
-
-{-- -| Stores the 'M.First' index of an element that matches the given 'Word8'
---
---     'elemIndexD_' terminates when it encounters a matching 'Word8' -}
--- elemIndexD_
---     :: (Monad m)
---     => Word8
---     -> a' -> Proxy  a' BS.ByteString a' BS.ByteString (WriterT (M.First Int64) m) ()
--- elemIndexD_ w8 = go 0 where
---     go n x = do
---         bs <- P.request x
---         case BS.elemIndex w8 bs of
---             Nothing -> do
---                 x2 <- P.respond bs
---                 go (n + fromIntegral (BS.length bs)) x2
---             Just i  -> lift . tell . M.First . Just $ n + fromIntegral i
+    :: (Monad m, Num a)
+    => Word8 -> Producer BS.ByteString m () -> m (Maybe a)
+elemIndex w8 = findIndex (w8 ==)
+{-# INLINABLE elemIndex #-}
 
 -- | Store a list of all indices whose elements match the given 'Word8'
-elemIndices
-    :: (Monad m)
-    => Word8 -> () -> Consumer BS.ByteString (WriterT [Int64] m) r
-elemIndices w8 = P.fold (List.map fromIntegral . BS.elemIndices w8)
+elemIndices :: (Monad m, Num a) => Word8 -> Pipe BS.ByteString a m r
+elemIndices w8 = findIndices (w8 ==)
+{-# INLINABLE elemIndices #-}
 
--- | Store the 'M.First' index of an element that satisfies the predicate
+-- | Store the first index of an element that satisfies the predicate
 findIndex
-    :: (Monad m)
-    => (Word8 -> Bool)
-    -> () -> Pipe BS.ByteString BS.ByteString (WriterT (M.First Int64) m) r
-findIndex pred = go 0 where
-    go n x = do
-        bs <- P.request x
-        case BS.findIndex pred bs of
-            Nothing -> do
-                x2 <- P.respond bs
-                go (n + fromIntegral (BS.length bs)) x2
-            Just i  -> do
-                lift . tell . M.First . Just $ n + fromIntegral i
-                x2 <- P.respond bs
-                P.pull x2
-
--- {-| Store the 'M.First' index of an element that satisfies the predicate
---
---     'findIndexD_' terminates when an element satisfies the predicate -}
--- findIndexD_
---     :: (Monad m)
---     => (Word8 -> Bool)
---     -> x -> Proxy x BS.ByteString x BS.ByteString (WriterT (M.First Int64) m) ()
--- findIndexD_ pred = go 0 where
---     go n x = do
---         bs <- P.request x
---         case BS.findIndex pred bs of
---             Nothing -> do
---                 x2 <- P.respond bs
---                 go (n + fromIntegral (BS.length bs)) x2
---             Just i  -> lift . tell . M.First . Just $ n + fromIntegral i
+    :: (Monad m, Num a)
+    => (Word8 -> Bool) -> Producer BS.ByteString m () -> m (Maybe a)
+findIndex predicate p = P.head (p >-> findIndices predicate)
+{-# INLINABLE findIndex #-}
 
 -- | Store a list of all indices whose elements satisfy the given predicate
-findIndices
-    :: (Monad m)
-    => (Word8 -> Bool)
-    -> () -> Pipe BS.ByteString BS.ByteString (WriterT [Int64] m) r
-findIndices pred = go 0 where
-    go n x = do
-        bs <- P.request x
-        lift . tell . List.map (\i -> n + fromIntegral i) $ BS.findIndices pred bs
-        x2 <- P.respond bs
-        go (n + fromIntegral (BS.length bs)) x2
+findIndices :: (Monad m, Num a) => (Word8 -> Bool) -> Pipe BS.ByteString a m r
+findIndices predicate = go 0
+  where
+    go n = do
+        bs <- await
+	each $ List.map (\i -> n + fromIntegral i) (BS.findIndices predicate bs)
+        go $! n + fromIntegral (BS.length bs)
+{-# INLINABLE findIndices #-}
 
 -- | Store a tally of how many elements match the given 'Word8'
-count
-    :: (Monad m)
-    => Word8
-    -> () -> Consumer BS.ByteString (WriterT (M.Sum Int64) m) r
-count w8 () = go where
-    go = do
-        a <- request ()
-        (lift . tell . M.Sum . fromIntegral . BS.count w8) a
- --       x2 <- respond a
-        go
-
+count :: (Monad m, Num a) => Word8 -> Producer BS.ByteString m () -> m a
+count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
+{-# INLINABLE count #-}
 
 -- | Stream bytes from 'stdin'
-stdin :: () -> Producer BS.ByteString IO ()
-stdin = readHandle IO.stdin
+stdin :: Producer BS.ByteString IO ()
+stdin = fromHandle IO.stdin
+{-# INLINABLE stdin #-}
 
 -- | Stream bytes to 'stdout'
-stdout :: () -> Consumer BS.ByteString IO r
-stdout = writeHandle IO.stdout
+stdout :: Consumer BS.ByteString IO r
+stdout = toHandle IO.stdout
+{-# INLINABLE stdout #-}
 
--- | Convert a 'Handle' into a byte stream
-readHandle :: Handle -> () -> Producer BS.ByteString IO ()
-readHandle = hGetSome BLI.defaultChunkSize
+-- | Convert a 'Handle' into a byte stream using a default chunk size
+fromHandle :: Handle -> Producer BS.ByteString IO ()
+fromHandle = hGetSome BLI.defaultChunkSize
+-- TODO: Test chunk size for performance
+{-# INLINABLE fromHandle #-}
 
 -- | Convert a byte stream into a 'Handle'
-writeHandle :: Handle -> () -> Consumer BS.ByteString IO r
-writeHandle h () = go where
-    go = do
-          a  <- request ()
-          _  <- lift $ BS.hPut h a
-      --    x2 <- respond a
-          go
+toHandle :: Handle -> Consumer BS.ByteString IO r
+toHandle h = for cat (lift . BS.hPut h)
+{-# INLINABLE toHandle #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGetSome
-  :: Int -> Handle -> () -> Producer BS.ByteString IO ()
-hGetSome size h () = go where
+hGetSome :: Int -> Handle -> Producer BS.ByteString IO ()
+hGetSome size h = go where
     go = do
-        eof <- lift $ hIsEOF h
+        eof <- lift (hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift $ BS.hGetSome h size
-                P.respond bs
+                bs <- lift (BS.hGetSome h size)
+                yield bs
                 go
+{-# INLINABLE hGetSome #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetSome_ :: Handle -> Int -> Server Int BS.ByteString IO ()
-hGetSome_ h = go where
+hGetSomeN :: Handle -> Int -> Server Int BS.ByteString IO ()
+hGetSomeN h = go where
     go size = do
-        eof <- lift $ hIsEOF h
+        eof <- lift (hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift $ BS.hGetSome h size
-                size2 <- P.respond bs
+                bs    <- lift (BS.hGetSome h size)
+                size2 <- respond bs
                 go size2
+{-# INLINABLE hGetSomeN #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGet
-    :: Int -> Handle -> () -> Producer BS.ByteString IO ()
-hGet size h () = go where
+hGet :: Int -> Handle -> Producer BS.ByteString IO ()
+hGet size h = go where
     go = do
-        eof <- lift $ hIsEOF h
+        eof <- lift (hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift $ BS.hGet h size
-                P.respond bs
+                bs <- lift (BS.hGet h size)
+                yield bs
                 go
+{-# INLINABLE hGet #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGet_ :: Handle -> Int -> Server Int BS.ByteString IO ()
-hGet_ h = go where
+hGetN :: Handle -> Int -> Server Int BS.ByteString IO ()
+hGetN h = go where
     go size = do
-        eof <- lift $ hIsEOF h
+        eof <- lift (hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift $ BS.hGet h size
-                size2 <- P.respond bs
+                bs    <- lift $ BS.hGet h size
+                size2 <- respond bs
                 go size2
+{-# INLINABLE hGetN #-}
