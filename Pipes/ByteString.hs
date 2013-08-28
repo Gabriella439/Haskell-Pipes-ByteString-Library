@@ -106,12 +106,9 @@ import qualified System.IO as IO
 import qualified Data.List as List
 import Prelude hiding (
     head,
-    tail,
     last,
     length,
     map,
-    foldr,
-    init,
     concatMap,
     any,
     all,
@@ -122,7 +119,7 @@ import Prelude hiding (
     elem,
     notElem,
     filter,
-    null)
+    null )
 
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
