@@ -37,8 +37,10 @@ module Pipes.ByteString (
     stdin,
     fromHandle,
     hGetSome,
-    hGetSomeN,
     hGet,
+
+    -- * Servers
+    hGetSomeN,
     hGetN,
 
     -- * Consumers
@@ -140,19 +142,6 @@ hGetSome size h = go where
                 go
 {-# INLINABLE hGetSome #-}
 
--- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetSomeN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
-hGetSomeN h = go where
-    go size = do
-        eof <- lift (IO.hIsEOF h)
-        if eof
-            then return ()
-            else do
-                bs    <- lift (BS.hGetSome h size)
-                size2 <- respond bs
-                go size2
-{-# INLINABLE hGetSomeN #-}
-
 -- | Convert a handle into a byte stream using a fixed chunk size
 hGet :: Int -> IO.Handle -> Producer' BS.ByteString IO ()
 hGet size h = go where
@@ -165,6 +154,19 @@ hGet size h = go where
                 yield bs
                 go
 {-# INLINABLE hGet #-}
+
+-- | Convert a handle into a byte stream that serves variable chunk sizes
+hGetSomeN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
+hGetSomeN h = go where
+    go size = do
+        eof <- lift (IO.hIsEOF h)
+        if eof
+            then return ()
+            else do
+                bs    <- lift (BS.hGetSome h size)
+                size2 <- respond bs
+                go size2
+{-# INLINABLE hGetSomeN #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
 hGetN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
