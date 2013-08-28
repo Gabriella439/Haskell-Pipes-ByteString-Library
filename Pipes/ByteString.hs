@@ -126,7 +126,6 @@ import Prelude hiding (
     last,
     length,
     map,
-    foldl',
     foldr,
     init,
     concatMap,
