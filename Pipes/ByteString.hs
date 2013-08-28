@@ -2,33 +2,33 @@
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
-    with both 'Handle's and lazy 'ByteString's.
+    with both 'IO.Handle's and lazy 'ByteString's.
 
-    To stream from 'Handle's, use 'readHandleS' or 'writeHandleD' to convert
-    them into the equivalent proxies.  For example, the following program copies
-    data from one file to another:
+    To stream to or from 'IO.Handle's, use 'fromHandle' or 'toHandle'.  For
+    example, the following program copies data from one file to another:
 
-> import Control.Proxy
-> import Control.Proxy.ByteString
+> import Pipes
+> import qualified Pipes.ByteString as P
+> import System.IO
 >
 > main =
 >     withFile "inFile.txt"  ReadMode  $ \hIn  ->
 >     withFile "outFile.txt" WriteMode $ \hOut ->
->     runProxy $ readHandleS hIn >-> writeHandleD hOut
+>     runEffect $ P.fromHandle hIn >-> P.toHandle hOut
 
     You can also stream to and from 'stdin' and 'stdout' using the predefined
-    'stdinS' and 'stdoutD' proxies, like in the following \"echo\" program:
+    'stdin' and 'stdout' proxies, like in the following \"echo\" program:
 
-> main = runProxy $ stdinS >-> stdoutD
+> main = runEffect $ P.stdin >-> stdout.P
 
     You can also translate pure lazy 'BL.ByteString's to and from proxies:
 
 > import qualified Data.ByteString.Lazy.Char8 as BL
 >
-> main = runProxy $ fromLazyS (BL.pack "Hello, world!\n") >-> stdoutD
+> main = runProxy $ P.fromLazy (BL.pack "Hello, world!\n") >-> P.stdout
 
     In addition, this module provides many functions equivalent to lazy
-    'ByteString' functions so that you can transform byte streams.
+    'ByteString' functions so that you can transform or fold byte streams.
 -}
 
 module Pipes.ByteString (
@@ -97,17 +97,11 @@ import Data.Functor.Identity (Identity)
 import Pipes
 import Pipes.Core (respond, Server)
 import qualified Pipes.Prelude as P
-import Pipes.Lift
-import Control.Monad.Trans.State.Strict (StateT(StateT))
-import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
-import Data.Foldable (forM_)
-import qualified Data.Monoid as M
 import Data.Word (Word8)
-import System.IO (Handle, hIsEOF)
 import qualified System.IO as IO
 import qualified Data.List as List
 import Prelude hiding (
@@ -380,22 +374,22 @@ stdout :: Consumer BS.ByteString IO r
 stdout = toHandle IO.stdout
 {-# INLINABLE stdout #-}
 
--- | Convert a 'Handle' into a byte stream using a default chunk size
-fromHandle :: Handle -> Producer BS.ByteString IO ()
+-- | Convert a 'IO.Handle' into a byte stream using a default chunk size
+fromHandle :: IO.Handle -> Producer BS.ByteString IO ()
 fromHandle = hGetSome BLI.defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
 
 -- | Convert a byte stream into a 'Handle'
-toHandle :: Handle -> Consumer BS.ByteString IO r
+toHandle :: IO.Handle -> Consumer BS.ByteString IO r
 toHandle h = for cat (lift . BS.hPut h)
 {-# INLINABLE toHandle #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGetSome :: Int -> Handle -> Producer BS.ByteString IO ()
+hGetSome :: Int -> IO.Handle -> Producer BS.ByteString IO ()
 hGetSome size h = go where
     go = do
-        eof <- lift (hIsEOF h)
+        eof <- lift (IO.hIsEOF h)
         if eof
             then return ()
             else do
@@ -405,10 +399,10 @@ hGetSome size h = go where
 {-# INLINABLE hGetSome #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetSomeN :: Handle -> Int -> Server Int BS.ByteString IO ()
+hGetSomeN :: IO.Handle -> Int -> Server Int BS.ByteString IO ()
 hGetSomeN h = go where
     go size = do
-        eof <- lift (hIsEOF h)
+        eof <- lift (IO.hIsEOF h)
         if eof
             then return ()
             else do
@@ -418,10 +412,10 @@ hGetSomeN h = go where
 {-# INLINABLE hGetSomeN #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGet :: Int -> Handle -> Producer BS.ByteString IO ()
+hGet :: Int -> IO.Handle -> Producer BS.ByteString IO ()
 hGet size h = go where
     go = do
-        eof <- lift (hIsEOF h)
+        eof <- lift (IO.hIsEOF h)
         if eof
             then return ()
             else do
@@ -431,10 +425,10 @@ hGet size h = go where
 {-# INLINABLE hGet #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetN :: Handle -> Int -> Server Int BS.ByteString IO ()
+hGetN :: IO.Handle -> Int -> Server Int BS.ByteString IO ()
 hGetN h = go where
     go size = do
-        eof <- lift (hIsEOF h)
+        eof <- lift (IO.hIsEOF h)
         if eof
             then return ()
             else do
