@@ -118,7 +118,6 @@ import Control.Monad.Trans.State.Strict (StateT(StateT))
 import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Builder as Builder
 import qualified Data.ByteString.Lazy.Internal as BLI
 import qualified Data.ByteString.Unsafe as BU
 import Data.Foldable (forM_)
