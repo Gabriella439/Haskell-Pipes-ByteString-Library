@@ -95,7 +95,7 @@ import Control.Monad (liftM)
 import Control.Monad.Trans.Class (lift)
 import Data.Functor.Identity (Identity)
 import Pipes
-import Pipes.Core (respond, Server)
+import Pipes.Core (respond, Server')
 import qualified Pipes.Prelude as P
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -126,7 +126,7 @@ import Prelude hiding (
 
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
-fromLazy :: (Monad m) => BL.ByteString -> Producer BS.ByteString m ()
+fromLazy :: (Monad m) => BL.ByteString -> Producer' BS.ByteString m ()
 fromLazy bs =
    BLI.foldrChunks (\e a -> yield e >> a) (return ()) bs
 {-# INLINABLE fromLazy #-}
@@ -365,28 +365,28 @@ count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
 
 -- | Stream bytes from 'stdin'
-stdin :: Producer BS.ByteString IO ()
+stdin :: Producer' BS.ByteString IO ()
 stdin = fromHandle IO.stdin
 {-# INLINABLE stdin #-}
 
 -- | Stream bytes to 'stdout'
-stdout :: Consumer BS.ByteString IO r
+stdout :: Consumer' BS.ByteString IO r
 stdout = toHandle IO.stdout
 {-# INLINABLE stdout #-}
 
 -- | Convert a 'IO.Handle' into a byte stream using a default chunk size
-fromHandle :: IO.Handle -> Producer BS.ByteString IO ()
+fromHandle :: IO.Handle -> Producer' BS.ByteString IO ()
 fromHandle = hGetSome BLI.defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
 
 -- | Convert a byte stream into a 'Handle'
-toHandle :: IO.Handle -> Consumer BS.ByteString IO r
+toHandle :: IO.Handle -> Consumer' BS.ByteString IO r
 toHandle h = for cat (lift . BS.hPut h)
 {-# INLINABLE toHandle #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGetSome :: Int -> IO.Handle -> Producer BS.ByteString IO ()
+hGetSome :: Int -> IO.Handle -> Producer' BS.ByteString IO ()
 hGetSome size h = go where
     go = do
         eof <- lift (IO.hIsEOF h)
@@ -399,7 +399,7 @@ hGetSome size h = go where
 {-# INLINABLE hGetSome #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetSomeN :: IO.Handle -> Int -> Server Int BS.ByteString IO ()
+hGetSomeN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
 hGetSomeN h = go where
     go size = do
         eof <- lift (IO.hIsEOF h)
@@ -412,7 +412,7 @@ hGetSomeN h = go where
 {-# INLINABLE hGetSomeN #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGet :: Int -> IO.Handle -> Producer BS.ByteString IO ()
+hGet :: Int -> IO.Handle -> Producer' BS.ByteString IO ()
 hGet size h = go where
     go = do
         eof <- lift (IO.hIsEOF h)
@@ -425,7 +425,7 @@ hGet size h = go where
 {-# INLINABLE hGet #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetN :: IO.Handle -> Int -> Server Int BS.ByteString IO ()
+hGetN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
 hGetN h = go where
     go size = do
         eof <- lift (IO.hIsEOF h)
