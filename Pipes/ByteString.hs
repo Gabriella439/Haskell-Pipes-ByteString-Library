@@ -222,28 +222,6 @@ tail = go where
                 x2 <- P.respond (BU.unsafeTail bs)
                 P.pull x2
 
--- | Pass along all but the last byte in the stream
-init :: Monad m => () -> Pipe BS.ByteString BS.ByteString m b
-init = go0 where
-    go0 x = do
-        bs <- P.request x
-        if (BS.null bs)
-            then do
-                x2 <- P.respond bs
-                go0 x2
-            else do
-                x2 <- P.respond (BS.init bs)
-                go1 (BS.last bs) x2
-    go1 w8 x = do
-        bs <- P.request x
-        if (BS.null bs)
-            then do
-                x2 <- P.respond bs
-                go1 w8 x2
-            else do
-                x2 <- P.respond (BS.cons w8 (BS.init bs))
-                go1 (BS.last bs) x2
-
 -- | Store whether 'M.All' received 'ByteString's are empty
 null
   :: Monad m
