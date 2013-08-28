@@ -99,12 +99,6 @@ module Pipes.ByteString (
     hGetSome_,
     hGet,
     hGet_,
-    
-    -- * Parsers
-    drawAllBytes,
-    passBytesUpTo,
-    drawBytesUpTo,
-    skipBytesUpTo
     ) where
 
 import Control.Monad (forever)
@@ -113,7 +107,6 @@ import Pipes
 import qualified Pipes as P
 import qualified Pipes.Prelude as P
 import Pipes.Lift
-import Pipes.Parse (draw, unDraw, drawAll, passUpTo, Draw(..), Sink, Conduit)
 import Control.Monad.Trans.State.Strict (StateT(StateT))
 import Control.Monad.Trans.Writer.Strict (WriterT, tell)
 import qualified Data.ByteString as BS
@@ -815,57 +808,3 @@ hGet_ h = go where
                 bs <- lift $ BS.hGet h size
                 size2 <- P.respond bs
                 go size2
-
--- | @drawAllBytes@ folds all input bytes, both upstream and in the pushback
--- buffer, into a single strict 'BS.ByteString'
-drawAllBytes
-    :: (Monad m)
-    => () -> Sink BS.ByteString (StateT [BS.ByteString] m) BS.ByteString
-drawAllBytes = fmap BS.concat . drawAll
-
--- | @passBytesUpTo n@ responds with at-most @n@ bytes from upstream and the
--- pushback buffer.
-passBytesUpTo
-    :: (Monad m)
-    => Int
-    -> Draw -> Conduit BS.ByteString BS.ByteString (StateT [BS.ByteString] m) r
-passBytesUpTo n0 = \_ -> go n0
-  where
-    go n =
-        if (n <= 0)
-        then forever $ P.respond Nothing
-        else do
-            mbs <- draw
-            case mbs of
-                Nothing -> forever $ P.respond Nothing
-                Just bs -> do
-                    let len = BS.length bs
-                    if (len <= n)
-                        then do
-                            P.respond (Just bs)
-                            go (n - len)
-                        else do
-                            let (prefix, suffix) = BS.splitAt n bs
-                            unDraw suffix
-                            P.respond (Just prefix)
-                            forever $ P.respond Nothing
-
--- | Draw at most @n@ bytes from both upstream and the pushback buffer.
-drawBytesUpTo
-    :: (Monad m)
-    => Int
-    -> Draw -> Conduit BS.ByteString BS.ByteString (StateT [BS.ByteString] m) BS.ByteString
-drawBytesUpTo n  = passBytesUpTo n >-> const go
-  where
-    go = draw >>= maybe (return BS.empty) (\x -> fmap (BS.append x) go)
-
--- | Skip at most @n@ bytes from both upstream and the pushback buffer.
-skipBytesUpTo
-    :: (Monad m)
-     => Int
-     -> Draw -> Sink BS.ByteString (StateT [BS.ByteString] m) ()
-skipBytesUpTo n = passBytesUpTo n >-> const go
-  where go = draw >>= maybe (return ()) (const go)
-
-
-
