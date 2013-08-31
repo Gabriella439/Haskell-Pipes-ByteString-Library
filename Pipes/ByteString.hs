@@ -25,7 +25,7 @@
 
 > import qualified Data.ByteString.Lazy.Char8 as BL
 >
-> main = runProxy $ P.fromLazy (BL.pack "Hello, world!\n") >-> P.stdout
+> main = runEffect $ P.fromLazy (BL.pack "Hello, world!\n") >-> P.stdout
 
     In addition, this module provides many functions equivalent to lazy
     'ByteString' functions so that you can transform or fold byte streams.
