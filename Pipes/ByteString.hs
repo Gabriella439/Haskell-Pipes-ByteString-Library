@@ -76,7 +76,10 @@ module Pipes.ByteString (
     index,
     elemIndex,
     findIndex,
-    count
+    count,
+
+    -- * Parsers
+    isEndOfBytes
     ) where
 
 import Control.Monad (liftM)
@@ -84,6 +87,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Functor.Identity (Identity)
 import Pipes
 import Pipes.Core (respond, Server')
+import Pipes.Parse (draw, unDraw, StateT)
 import qualified Pipes.Prelude as P
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
@@ -306,7 +310,7 @@ fold step begin done = P.fold (\x bs -> BS.foldl' step x bs) begin done
 
 -- | Retrieve the first 'Word8'
 head :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
-head = go 
+head = go
   where
     go p = do
         x <- next p
@@ -423,3 +427,17 @@ findIndex predicate p = P.head (p >-> findIndices predicate)
 count :: (Monad m, Num a) => Word8 -> Producer BS.ByteString m () -> m a
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
+
+{-| Checks if the underlying 'Producer' has any bytes left. Leading 'BS.empty'
+    chunks are discarded.
+-}
+isEndOfBytes :: (Monad m) => StateT (Producer BS.ByteString m r) m Bool
+isEndOfBytes = do
+    ma <- draw
+    case ma of
+        Just a
+          | BS.null a -> isEndOfBytes
+          | otherwise -> unDraw a >> return False
+        Nothing       -> return True
+{-# INLINABLE isEndOfBytes #-}
+
