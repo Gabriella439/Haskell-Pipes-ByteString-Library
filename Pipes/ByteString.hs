@@ -123,76 +123,76 @@ fromLazy bs =
 {-# INLINABLE fromLazy #-}
 
 -- | Stream bytes from 'stdin'
-stdin :: Producer' BS.ByteString IO ()
+stdin :: MonadIO m => Producer' BS.ByteString m ()
 stdin = fromHandle IO.stdin
 {-# INLINABLE stdin #-}
 
 -- | Convert a 'IO.Handle' into a byte stream using a default chunk size
-fromHandle :: IO.Handle -> Producer' BS.ByteString IO ()
+fromHandle :: MonadIO m => IO.Handle -> Producer' BS.ByteString m ()
 fromHandle = hGetSome BLI.defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGetSome :: Int -> IO.Handle -> Producer' BS.ByteString IO ()
+hGetSome :: MonadIO m => Int -> IO.Handle -> Producer' BS.ByteString m ()
 hGetSome size h = go where
     go = do
-        eof <- lift (IO.hIsEOF h)
+        eof <- liftIO (IO.hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift (BS.hGetSome h size)
+                bs <- liftIO (BS.hGetSome h size)
                 yield bs
                 go
 {-# INLINABLE hGetSome #-}
 
 -- | Convert a handle into a byte stream using a fixed chunk size
-hGet :: Int -> IO.Handle -> Producer' BS.ByteString IO ()
+hGet :: MonadIO m => Int -> IO.Handle -> Producer' BS.ByteString m ()
 hGet size h = go where
     go = do
-        eof <- lift (IO.hIsEOF h)
+        eof <- liftIO (IO.hIsEOF h)
         if eof
             then return ()
             else do
-                bs <- lift (BS.hGet h size)
+                bs <- liftIO (BS.hGet h size)
                 yield bs
                 go
 {-# INLINABLE hGet #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetSomeN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
+hGetSomeN :: MonadIO m => IO.Handle -> Int -> Server' Int BS.ByteString m ()
 hGetSomeN h = go where
     go size = do
-        eof <- lift (IO.hIsEOF h)
+        eof <- liftIO (IO.hIsEOF h)
         if eof
             then return ()
             else do
-                bs    <- lift (BS.hGetSome h size)
+                bs    <- liftIO (BS.hGetSome h size)
                 size2 <- respond bs
                 go size2
 {-# INLINABLE hGetSomeN #-}
 
 -- | Convert a handle into a byte stream that serves variable chunk sizes
-hGetN :: IO.Handle -> Int -> Server' Int BS.ByteString IO ()
+hGetN :: MonadIO m => IO.Handle -> Int -> Server' Int BS.ByteString m ()
 hGetN h = go where
     go size = do
-        eof <- lift (IO.hIsEOF h)
+        eof <- liftIO (IO.hIsEOF h)
         if eof
             then return ()
             else do
-                bs    <- lift $ BS.hGet h size
+                bs    <- liftIO $ BS.hGet h size
                 size2 <- respond bs
                 go size2
 {-# INLINABLE hGetN #-}
 
 -- | Stream bytes to 'stdout'
-stdout :: Consumer' BS.ByteString IO r
+stdout :: MonadIO m => Consumer' BS.ByteString m r
 stdout = toHandle IO.stdout
 {-# INLINABLE stdout #-}
 
 -- | Convert a byte stream into a 'Handle'
-toHandle :: IO.Handle -> Consumer' BS.ByteString IO r
-toHandle h = for cat (lift . BS.hPut h)
+toHandle :: MonadIO m => IO.Handle -> Consumer' BS.ByteString m r
+toHandle h = for cat (liftIO . BS.hPut h)
 {-# INLINABLE toHandle #-}
 
 -- | Apply a transformation to each 'Word8' in the stream
