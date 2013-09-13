@@ -29,6 +29,12 @@
 
     In addition, this module provides many functions equivalent to lazy
     'ByteString' functions so that you can transform or fold byte streams.
+
+    Note that functions in this library are designed to operate on streams that
+    are insensitive to chunk boundaries.  This means that they may freely split
+    chunks into smaller chunks and /discard empty chunks/.  However, they will
+    /never concatenate chunks/ in order to provide strict memory-usage
+    guarantees.
 -}
 
 module Pipes.ByteString (
@@ -76,16 +82,27 @@ module Pipes.ByteString (
     index,
     elemIndex,
     findIndex,
-    count
+    count,
+
+    -- * Low-level Parsers
+    draw,
+    peek,
+    isEndOfInput,
+
+    -- * Re-exports
+    -- $reexports
+    module Pipes.Parse
     ) where
 
-import Control.Monad (liftM)
+import Control.Monad (liftM, unless)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT)
 import Data.Functor.Identity (Identity)
 import Pipes
 import Pipes.Core (respond, Server')
-import Pipes.Parse (draw, unDraw, StateT)
 import qualified Pipes.Prelude as P
+import qualified Pipes.Parse as PP
+import Pipes.Parse (unDraw, input)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Internal as BLI
@@ -424,3 +441,60 @@ findIndex predicate p = P.head (p >-> findIndices predicate)
 count :: (Monad m, Num a) => Word8 -> Producer BS.ByteString m () -> m a
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
+
+{-| Draw one non-empty 'BS.ByteString' from the underlying 'Producer', returning
+    'Left' if the 'Producer' is empty
+-}
+draw
+    :: (Monad m)
+    => StateT (Producer BS.ByteString m r) m (Either r BS.ByteString)
+draw = do
+    x <- PP.draw
+    case x of
+        Left  r  -> return (Left r)
+        Right bs ->
+            if (BS.null bs)
+            then draw
+            else return (Right bs)
+{-# INLINABLE draw #-}
+
+{-| 'peek' checks the first non-empty 'BS.ByteString' in the stream, but uses
+    'PP.unDraw' to push the element back so that it is available for the next
+    'draw' command:
+
+> peek = do
+>     x <- draw
+>     case x of
+>         Left  _ -> return ()
+>         Right a -> unDraw a
+>     return x
+-}
+peek
+    :: (Monad m)
+    => StateT (Producer BS.ByteString m r) m (Either r BS.ByteString)
+peek = do
+    x <- draw
+    case x of
+        Left  _ -> return ()
+        Right a -> PP.unDraw a
+    return x
+{-# INLINABLE peek #-}
+
+{-| Check if the underlying 'Producer' has no more bytes
+
+    Note that this will ignore empty 'BS.ByteString's, unlike 'PP.isEndOfInput'
+    from @pipes-parse@.
+
+> isEndOfInput = liftM isLeft peek
+-}
+isEndOfInput :: (Monad m) => StateT (Producer BS.ByteString m r) m Bool
+isEndOfInput = do
+    x <- peek
+    return (case x of
+        Left  _ -> True
+        Right _ -> False )
+{-# INLINABLE isEndOfInput #-}
+
+{- $reexports
+    @Pipes.Parse@ re-exports 'unDraw' and 'input'
+-}
