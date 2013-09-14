@@ -119,26 +119,29 @@ module Pipes.ByteString (
     module Pipes.Parse
     ) where
 
+import Control.Exception (throwIO, try)
 import Control.Monad (liftM)
 import Control.Monad.Trans.State.Strict (StateT, modify)
-import Data.Char (ord)
-import Data.Functor.Identity (Identity)
-import Pipes hiding (next)
-import qualified Pipes as P
-import Pipes.Core (respond, Server')
-import qualified Pipes.Prelude as P
-import qualified Pipes.Parse as PP
-import Pipes.Parse (input, concat)
-import Pipes.Safe (MonadSafe, Base)
-import Pipes.Safe.Prelude (withFile)
 import qualified Data.ByteString as BS
 import Data.ByteString.Internal (isSpaceWord8)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
-import Data.Word (Word8)
-import qualified System.IO as IO
+import Data.Char (ord)
+import Data.Functor.Identity (Identity)
 import qualified Data.List as List
+import Data.Word (Word8)
+import Foreign.C.Error (Errno(Errno), ePIPE)
+import qualified GHC.IO.Exception as G
+import qualified Pipes as P
+import Pipes hiding (next)
+import Pipes.Core (respond, Server')
+import qualified Pipes.Parse as PP
+import Pipes.Parse (input, concat)
+import qualified Pipes.Prelude as P
+import Pipes.Safe (MonadSafe, Base)
+import Pipes.Safe.Prelude (withFile)
+import qualified System.IO as IO
 import Prelude hiding (
     all,
     any,
@@ -236,12 +239,33 @@ hGetN h = go where
                 go size2
 {-# INLINABLE hGetN #-}
 
--- | Stream bytes to 'stdout'
-stdout :: MonadIO m => Consumer' BS.ByteString m r
-stdout = toHandle IO.stdout
+{-| Stream bytes to 'stdout'
+
+    Unlike 'toHandle', 'stdout' gracefully terminates on a broken output pipe.
+
+    Note: For best performance, use @(for source (liftIO . putStr))@ instead of
+    @(source >-> stdout)@.
+-}
+stdout :: MonadIO m => Consumer' BS.ByteString m ()
+stdout = go
+  where
+    go = do
+        bs <- await
+        x  <- liftIO $ try (BS.putStr bs)
+        case x of
+            Left (G.IOError { G.ioe_type  = G.ResourceVanished
+                            , G.ioe_errno = Just ioe })
+                 | Errno ioe == ePIPE
+                     -> return ()
+            Left  e  -> liftIO (throwIO e)
+            Right () -> go
 {-# INLINABLE stdout #-}
 
--- | Convert a byte stream into a 'Handle'
+{-| Convert a byte stream into a 'Handle'
+
+    Note: For best performance, use @(for source (liftIO . hPutStr handle))@
+    instead of @(source >-> toHandle handle)@.
+-}
 toHandle :: MonadIO m => IO.Handle -> Consumer' BS.ByteString m r
 toHandle h = for cat (liftIO . BS.hPut h)
 {-# INLINABLE toHandle #-}
