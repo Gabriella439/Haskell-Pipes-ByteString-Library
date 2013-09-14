@@ -120,10 +120,11 @@ module Pipes.ByteString (
 import Control.Monad (liftM, unless, void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT)
+import Data.Char (chr, ord, isSpace)
 import Data.Functor.Identity (Identity)
-import Pipes
+import Pipes hiding (next)
+import qualified Pipes as P
 import Pipes.Core (respond, Server')
-import Pipes.Lift (execStateP)
 import qualified Pipes.Prelude as P
 import qualified Pipes.Parse as PP
 import Pipes.Parse (unDraw, input, concat)
@@ -380,11 +381,8 @@ head = go
     go p = do
         x <- next p
         case x of
-            Left   ()      -> return Nothing
-            Right (bs, p') ->
-                if (BS.null bs)
-                then go p'
-                else return $ Just (BU.unsafeHead bs)
+            Left   _      -> return  Nothing
+            Right (w8, _) -> return (Just w8)
 {-# INLINABLE head #-}
 
 -- | Retrieve the last 'Word8'
@@ -392,7 +390,7 @@ last :: (Monad m) => Producer BS.ByteString m () -> m (Maybe Word8)
 last = go Nothing
   where
     go r p = do
-        x <- next p
+        x <- P.next p
         case x of
             Left   ()      -> return r
             Right (bs, p') ->
@@ -430,9 +428,9 @@ maximum = P.fold step Nothing id
     step mw8 bs =
         if (BS.null bs)
         then mw8
-        else case mw8 of
-            Nothing -> Just (BS.maximum bs)
-            Just w8 -> Just (max w8 (BS.maximum bs))
+        else Just $ case mw8 of
+            Nothing -> BS.maximum bs
+            Just w8 -> max w8 (BS.maximum bs)
 {-# INLINABLE maximum #-}
 
 -- | Return the minimum 'Word8' within a byte stream
@@ -523,7 +521,7 @@ splitAt = go
   where
     go 0 p = return (Right p)
     go n p = do
-        x <- lift (next p)
+        x <- lift (P.next p)
         case x of
             Left   r       -> return (Left r)
             Right (bs, p') -> do
@@ -564,7 +562,7 @@ span
 span predicate = go
   where
     go p = do
-        x <- lift (next p)
+        x <- lift (P.next p)
         case x of
             Left   r       -> return (return r)
             Right (bs, p') -> do
@@ -600,7 +598,7 @@ splitWith
 splitWith predicate p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
-        x <- next p
+        x <- P.next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') ->
@@ -611,12 +609,10 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
                     return $ PP.FreeT (go1 p'')
     go1 p = do
         x <- next p
-        case x of
-            Left   r       -> return (PP.Pure r)
-            Right (bs, p') -> case (BS.uncons bs) of
-                Nothing       -> go1 p'
-                Just (_, bs') -> return $ PP.Free $ do
-                    p'' <- span predicate (yield bs' >> p')
+        return $ case x of
+            Left   r      -> PP.Pure r
+            Right (_, p') -> PP.Free $ do
+                    p'' <- span predicate p'
                     return $ PP.FreeT (go1 p'')
 {-# INLINABLE splitWith #-}
 
@@ -639,7 +635,7 @@ groupBy
 groupBy equal p0 = PP.FreeT (go p0)
   where
     go p = do
-        x <- next p
+        x <- P.next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') -> case (BS.uncons bs) of
@@ -669,7 +665,7 @@ lines
 lines p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
-        x <- next p
+        x <- P.next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') ->
@@ -677,16 +673,33 @@ lines p0 = PP.FreeT (go0 p0)
                 then go0 p'
                 else return $ PP.Free $ go1 (yield bs >> p')
     go1 p = do
-        p' <- break (10 ==) p
+        p' <- break (fromIntegral (ord '\n') ==) p
         return $ PP.FreeT (go2 p')
     go2 p = do
         x  <- next p
-        case x of
-            Left   r       -> return (PP.Pure r)
-            Right (bs, p') -> case (BS.uncons bs) of
-                Nothing       -> go2 p'
-                Just (_, bs') -> return $ PP.Free $ go1 (yield bs' >> p')
+        return $ case x of
+            Left   r       -> PP.Pure r
+            Right (w8, p') -> PP.Free (go1 p')
 {-# INLINABLE lines #-}
+
+{-
+{-| Split a byte stream into 'FreeT'-delimited words
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Text' equivalent of this
+    function from the upcoming @pipes-text@ library.
+-}
+words
+    :: (Monad m)
+    => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
+words = go
+  where
+    go p = FreeT $ do
+        x <- next $ p >-> dropWhile (isSpace . chr)
+        case x of
+            Left r
+{-# INLINABLE words #-}
+-}
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
@@ -695,14 +708,14 @@ intersperse
 intersperse w8 = go0
   where
     go0 p = do
-        x <- lift (next p)
+        x <- lift (P.next p)
         case x of
             Left   r       -> return r
             Right (bs, p') -> do
                 yield (BS.intersperse w8 bs)
                 go1 p'
     go1 p = do
-        x <- lift (next p)
+        x <- lift (P.next p)
         case x of
             Left   r       -> return r
             Right (bs, p') -> do
@@ -755,9 +768,30 @@ unlines = go
             PP.Pure r -> return r
             PP.Free p -> do
                 f' <- p
-                yield (BS.singleton 10)
+                yield $ BS.singleton $ fromIntegral (ord '\n')
                 go f'
 {-# INLINABLE unlines #-}
+
+{-| Consume the first byte from a byte stream
+
+    'next' either fails with a 'Left' if the 'Producer' has no more bytes or
+    succeeds with a 'Right' providing the next byte and the remainder of the
+    'Producer'.
+-}
+next
+    :: (Monad m)
+    => Producer BS.ByteString m r
+    -> m (Either r (Word8, Producer BS.ByteString m r))
+next = go
+  where
+    go p = do
+        x <- P.next p
+        case x of
+            Left   r       -> return (Left r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing        -> go p'
+                Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
+{-# INLINABLE next #-}
 
 {-| Draw one non-empty 'BS.ByteString' from the underlying 'Producer', returning
     'Left' if the 'Producer' is empty
