@@ -34,7 +34,7 @@
 
 > import Pipes
 > import qualified Pipes.ByteString as PB
-> import qualified Pipes.Parse as PP
+> import qualified Pipes.Parse      as PP
 >
 > main = runEffect $ takeLines 3 PB.stdin >-> PB.stdout
 >   where
