@@ -516,7 +516,7 @@ splitAt
     :: (Monad m, Integral n)
     => n
     -> Producer BS.ByteString m r
-    -> Producer BS.ByteString m (Either r (Producer BS.ByteString m r))
+    -> Producer' BS.ByteString m (Either r (Producer BS.ByteString m r))
 splitAt = go
   where
     go 0 p = return (Right p)
@@ -558,7 +558,7 @@ span
     :: (Monad m)
     => (Word8 -> Bool)
     -> Producer BS.ByteString m r
-    -> Producer BS.ByteString m (Producer BS.ByteString m r)
+    -> Producer' BS.ByteString m (Producer BS.ByteString m r)
 span predicate = go
   where
     go p = do
