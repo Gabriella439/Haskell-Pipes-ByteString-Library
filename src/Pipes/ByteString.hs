@@ -123,7 +123,9 @@ module Pipes.ByteString (
     unwords,
 
     -- * Low-level Parsers
+    next,
     draw,
+    unDraw,
     peek,
     isEndOfInput,
 
