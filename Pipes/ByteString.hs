@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes, TypeFamilies #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
@@ -85,6 +85,10 @@ module Pipes.ByteString (
     findIndex,
     count,
 
+    -- * Files
+    readFile,
+    writeFile,
+
     -- * Splitters
     splitAt,
     chunksOf,
@@ -121,6 +125,8 @@ import Pipes.Lift (execStateP)
 import qualified Pipes.Prelude as P
 import qualified Pipes.Parse as PP
 import Pipes.Parse (unDraw, input, concat)
+import Pipes.Safe (MonadSafe, Base)
+import Pipes.Safe.Prelude (withFile)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Internal as BLI
@@ -146,11 +152,12 @@ import Prelude hiding (
     minimum,
     notElem,
     null,
+    readFile,
     span,
     splitAt,
     take,
-    takeWhile )
-
+    takeWhile,
+    writeFile )
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
 fromLazy :: (Monad m) => BL.ByteString -> Producer' BS.ByteString m ()
@@ -482,6 +489,22 @@ count :: (Monad m, Num n) => Word8 -> Producer BS.ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
 
+{-| Read bytes from a file, automatically opening and closing the file as
+    necessary
+-}
+readFile
+    :: (MonadSafe m, Base m ~ IO) => FilePath -> Producer' BS.ByteString m ()
+readFile file = withFile file IO.ReadMode fromHandle
+{-# INLINABLE readFile #-}
+
+{-| Write bytes to a file, automatically opening and closing the file as
+    necessary
+-}
+writeFile
+    :: (MonadSafe m, Base m ~ IO) => FilePath -> Consumer' BS.ByteString m r
+writeFile file = withFile file IO.WriteMode toHandle
+{-# INLINABLE writeFile #-}
+
 {-| Splits a 'Producer' after the given number of bytes
 
     @(splitAt n p)@ returns remainder of the bytes if @p@ had at least @n@ bytes
@@ -562,6 +585,9 @@ break
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
+{-| Split a byte stream into sub-streams delimited by bytes that satisfy the
+    predicate
+-}
 splitWith
     :: (Monad m)
     => (Word8 -> Bool)
@@ -583,6 +609,7 @@ splitWith predicate = go0
                     return $ PP.FreeT (go1 p'')
 {-# INLINABLE splitWith #-}
 
+-- | Split a byte stream using the given 'Word8' as the delimiter
 split :: (Monad m)
       => Word8
       -> Producer BS.ByteString m r
