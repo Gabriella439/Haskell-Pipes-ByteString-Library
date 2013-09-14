@@ -1,4 +1,4 @@
-{-#LANGUAGE RankNTypes#-}
+{-# LANGUAGE RankNTypes #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'BS.ByteString's chunks.  Use byte streams to interact
@@ -63,6 +63,7 @@ module Pipes.ByteString (
     filter,
     elemIndices,
     findIndices,
+    scan,
 
     -- * Folds
     toLazy,
@@ -84,6 +85,16 @@ module Pipes.ByteString (
     findIndex,
     count,
 
+    -- * Splitters
+    splitAt,
+    chunksOf,
+
+    -- * Transformations
+    intersperse,
+
+    -- * Joiners
+    intercalate,
+
     -- * Low-level Parsers
     draw,
     peek,
@@ -102,7 +113,7 @@ import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Prelude as P
 import qualified Pipes.Parse as PP
-import Pipes.Parse (unDraw, input)
+import Pipes.Parse (unDraw, input, concat)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.ByteString.Lazy.Internal as BLI
@@ -111,6 +122,7 @@ import Data.Word (Word8)
 import qualified System.IO as IO
 import qualified Data.List as List
 import Prelude hiding (
+    concat,
     head,
     last,
     length,
@@ -127,7 +139,8 @@ import Prelude hiding (
     filter,
     null,
     maximum,
-    minimum )
+    minimum,
+    splitAt )
 
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
@@ -194,7 +207,7 @@ hGetN h = go where
         if eof
             then return ()
             else do
-                bs    <- liftIO $ BS.hGet h size
+                bs    <- liftIO (BS.hGet h size)
                 size2 <- respond bs
                 go size2
 {-# INLINABLE hGetN #-}
@@ -228,7 +241,7 @@ take n0 = go n0 where
         | n <= 0    = return ()
         | otherwise = do
             bs <- await
-            let len = fromIntegral $ BS.length bs
+            let len = fromIntegral (BS.length bs)
             if (len > n)
                 then yield (BU.unsafeTake (fromIntegral n) bs)
                 else do
@@ -283,12 +296,12 @@ filter pred = P.map (BS.filter pred)
 {-# INLINABLE filter #-}
 
 -- | Store a list of all indices whose elements match the given 'Word8'
-elemIndices :: (Monad m, Num a) => Word8 -> Pipe BS.ByteString a m r
+elemIndices :: (Monad m, Num n) => Word8 -> Pipe BS.ByteString n m r
 elemIndices w8 = findIndices (w8 ==)
 {-# INLINABLE elemIndices #-}
 
 -- | Store a list of all indices whose elements satisfy the given predicate
-findIndices :: (Monad m, Num a) => (Word8 -> Bool) -> Pipe BS.ByteString a m r
+findIndices :: (Monad m, Num n) => (Word8 -> Bool) -> Pipe BS.ByteString n m r
 findIndices predicate = go 0
   where
     go n = do
@@ -296,6 +309,22 @@ findIndices predicate = go 0
 	each $ List.map (\i -> n + fromIntegral i) (BS.findIndices predicate bs)
         go $! n + fromIntegral (BS.length bs)
 {-# INLINABLE findIndices #-}
+
+-- | Strict left scan over the bytes
+scan
+    :: (Monad m)
+    => (Word8 -> Word8 -> Word8)
+    -> Word8
+    -> Pipe BS.ByteString BS.ByteString m r
+scan step begin = go begin
+  where
+    go w8 = do
+        bs <- await
+        let bs' = BS.scanl step begin bs
+            w8' = BS.last bs'
+        yield bs'
+        go w8'
+{-# INLINABLE scan #-}
 
 {-| Fold a pure 'Producer' of strict 'BS.ByteString's into a lazy
     'BL.ByteString'
@@ -358,7 +387,7 @@ null = P.all BS.null
 {-# INLINABLE null #-}
 
 -- | Count the number of bytes
-length :: (Monad m, Num a) => Producer BS.ByteString m () -> m a
+length :: (Monad m, Num n) => Producer BS.ByteString m () -> m n
 length = P.fold (\n bs -> n + fromIntegral (BS.length bs)) 0 id
 {-# INLINABLE length #-}
 
@@ -425,22 +454,116 @@ index n p = head (p >-> drop n)
 
 -- | Find the index of an element that matches the given 'Word8'
 elemIndex
-    :: (Monad m, Num a)
-    => Word8 -> Producer BS.ByteString m () -> m (Maybe a)
+    :: (Monad m, Num n)
+    => Word8 -> Producer BS.ByteString m () -> m (Maybe n)
 elemIndex w8 = findIndex (w8 ==)
 {-# INLINABLE elemIndex #-}
 
 -- | Store the first index of an element that satisfies the predicate
 findIndex
-    :: (Monad m, Num a)
-    => (Word8 -> Bool) -> Producer BS.ByteString m () -> m (Maybe a)
+    :: (Monad m, Num n)
+    => (Word8 -> Bool) -> Producer BS.ByteString m () -> m (Maybe n)
 findIndex predicate p = P.head (p >-> findIndices predicate)
 {-# INLINABLE findIndex #-}
 
 -- | Store a tally of how many elements match the given 'Word8'
-count :: (Monad m, Num a) => Word8 -> Producer BS.ByteString m () -> m a
+count :: (Monad m, Num n) => Word8 -> Producer BS.ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
+
+{-| Splits a 'Producer' after the given number of bytes
+
+    @(splitAt n p)@ returns remainder of the bytes if @p@ had at least @n@ bytes
+    or returns 'Left' if @p@ had an insufficient number of bytes.
+-}
+splitAt
+    :: (Monad m, Integral n)
+    => n
+    -> Producer BS.ByteString m r
+    -> Producer BS.ByteString m (Either r (Producer BS.ByteString m r))
+splitAt = go
+  where
+    go 0 p = return (Right p)
+    go n p = do
+        x <- lift (next p)
+        case x of
+            Left   r       -> return (Left r)
+            Right (bs, p') -> do
+                let len = fromIntegral (BS.length bs)
+                if (len <= n)
+                    then do
+                        yield bs
+                        go (n - len) p'
+                    else do
+                        let (prefix, suffix) = BS.splitAt (fromIntegral n) bs
+                        yield prefix
+                        return $ Right (yield suffix >> p')
+{-# INLINABLE splitAt #-}
+
+-- | Split a byte stream into 'PP.FreeT'-delimited byte streams of fixed size
+chunksOf
+    :: (Monad m, Integral n)
+    => n
+    -> Producer BS.ByteString m r
+    -> PP.FreeT (Producer BS.ByteString m) m r
+chunksOf n = go
+  where
+    go p = PP.FreeT $ return $ PP.Free $ do
+        x <- splitAt n p
+        return $ case x of
+            Left  r  -> return r
+            Right p' -> go p'
+{-# INLINABLE chunksOf #-}
+
+-- | Intersperse a 'Word8' in between the bytes of the byte stream
+intersperse
+    :: (Monad m)
+    => Word8 -> Producer BS.ByteString m r -> Producer BS.ByteString m r
+intersperse w8 = go0
+  where
+    go0 p = do
+        x <- lift (next p)
+        case x of
+            Left   r       -> return r
+            Right (bs, p') -> do
+                yield (BS.intersperse w8 bs)
+                go1 p'
+    go1 p = do
+        x <- lift (next p)
+        case x of
+            Left   r       -> return r
+            Right (bs, p') -> do
+                yield (BS.singleton w8)
+                yield (BS.intersperse w8 bs)
+                go1 p'
+{-# INLINABLE intersperse #-}
+
+{-| 'intercalate' concatenates the 'FreeT'-delimited byte streams after
+    interspersing a byte stream in between them
+-}
+intercalate
+    :: (Monad m)
+    => Producer BS.ByteString m ()
+    -> PP.FreeT (Producer BS.ByteString m) m r
+    -> Producer BS.ByteString m r
+intercalate p0 = go0
+  where
+    go0 f = do
+        x <- lift (PP.runFreeT f)
+        case x of
+            PP.Pure r -> return r
+            PP.Free p -> do
+                f' <- p
+                go1 f'
+    go1 f = do
+        x <- lift (PP.runFreeT f)
+        case x of
+            PP.Pure r -> return r
+            PP.Free p -> do
+                p0
+                f' <- p
+                go1 f'
+{-# INLINABLE intercalate #-}
 
 {-| Draw one non-empty 'BS.ByteString' from the underlying 'Producer', returning
     'Left' if the 'Producer' is empty
@@ -496,5 +619,5 @@ isEndOfInput = do
 {-# INLINABLE isEndOfInput #-}
 
 {- $reexports
-    @Pipes.Parse@ re-exports 'unDraw' and 'input'
+    @Pipes.Parse@ re-exports 'unDraw', 'input', and 'concat'
 -}
