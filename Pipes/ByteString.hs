@@ -98,12 +98,14 @@ module Pipes.ByteString (
     split,
     groupBy,
     group,
+    lines,
 
     -- * Transformations
     intersperse,
 
     -- * Joiners
     intercalate,
+    unlines,
 
     -- * Low-level Parsers
     draw,
@@ -146,6 +148,7 @@ import Prelude hiding (
     filter,
     head,
     last,
+    lines,
     length,
     map,
     maximum,
@@ -157,6 +160,7 @@ import Prelude hiding (
     splitAt,
     take,
     takeWhile,
+    unlines,
     writeFile )
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
@@ -593,11 +597,18 @@ splitWith
     => (Word8 -> Bool)
     -> Producer BS.ByteString m r
     -> PP.FreeT (Producer BS.ByteString m) m r
-splitWith predicate = go0
+splitWith predicate p0 = PP.FreeT (go0 p0)
   where
-    go0 p = PP.FreeT $ return $ PP.Free $ do
-        p' <- span predicate p
-        return $ PP.FreeT (go1 p')
+    go0 p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go0 p'
+                else return $ PP.Free $ do
+                    p'' <- span predicate (yield bs >> p')
+                    return $ PP.FreeT (go1 p'')
     go1 p = do
         x <- next p
         case x of
@@ -645,6 +656,37 @@ group
     => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
 group = groupBy (==)
 {-# INLINABLE group #-}
+
+{-| Split a byte stream into 'FreeT'-delimited lines
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Text' equivalent of this
+    function from the upcoming @pipes-text@ library.
+-}
+lines
+    :: (Monad m)
+    => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
+lines p0 = PP.FreeT (go0 p0)
+  where
+    go0 p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go0 p'
+                else return $ PP.Free $ go1 (yield bs >> p')
+    go1 p = do
+        p' <- break (10 ==) p
+        return $ PP.FreeT (go2 p')
+    go2 p = do
+        x  <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing       -> go2 p'
+                Just (_, bs') -> return $ PP.Free $ go1 (yield bs' >> p')
+{-# INLINABLE lines #-}
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
@@ -695,6 +737,27 @@ intercalate p0 = go0
                 f' <- p
                 go1 f'
 {-# INLINABLE intercalate #-}
+
+{-| Join 'FreeT'-delimited lines into a byte stream
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Text' equivalent of this
+    function from the upcoming @pipes-text@ library.
+-}
+unlines
+    :: (Monad m)
+    => PP.FreeT (Producer BS.ByteString m) m r -> Producer BS.ByteString m r
+unlines = go
+  where
+    go f = do
+        x <- lift (PP.runFreeT f)
+        case x of
+            PP.Pure r -> return r
+            PP.Free p -> do
+                f' <- p
+                yield (BS.singleton 10)
+                go f'
+{-# INLINABLE unlines #-}
 
 {-| Draw one non-empty 'BS.ByteString' from the underlying 'Producer', returning
     'Left' if the 'Producer' is empty
