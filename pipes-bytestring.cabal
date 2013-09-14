@@ -16,6 +16,7 @@ Source-Repository head
     Location: https://github.com/Gabriel439/Haskell-Pipes-ByteString-Library
 
 Library
+    Hs-Source-Dirs: src
     Build-Depends:
         base         >= 4       && < 5   ,
         bytestring   >= 0.9.2.1 && < 0.11,
