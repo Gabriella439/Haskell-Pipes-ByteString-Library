@@ -88,6 +88,12 @@ module Pipes.ByteString (
     -- * Splitters
     splitAt,
     chunksOf,
+    span,
+    break,
+    splitWith,
+    split,
+    groupBy,
+    group,
 
     -- * Transformations
     intersperse,
@@ -105,12 +111,13 @@ module Pipes.ByteString (
     module Pipes.Parse
     ) where
 
-import Control.Monad (liftM, unless)
+import Control.Monad (liftM, unless, void)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.State.Strict (StateT)
 import Data.Functor.Identity (Identity)
 import Pipes
 import Pipes.Core (respond, Server')
+import Pipes.Lift (execStateP)
 import qualified Pipes.Prelude as P
 import qualified Pipes.Parse as PP
 import Pipes.Parse (unDraw, input, concat)
@@ -122,25 +129,27 @@ import Data.Word (Word8)
 import qualified System.IO as IO
 import qualified Data.List as List
 import Prelude hiding (
+    all,
+    any,
+    break,
     concat,
+    concatMap,
+    drop,
+    dropWhile,
+    elem,
+    filter,
     head,
     last,
     length,
     map,
-    concatMap,
-    any,
-    all,
-    take,
-    drop,
-    takeWhile,
-    dropWhile,
-    elem,
-    notElem,
-    filter,
-    null,
     maximum,
     minimum,
-    splitAt )
+    notElem,
+    null,
+    span,
+    splitAt,
+    take,
+    takeWhile )
 
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
@@ -267,14 +276,16 @@ drop n0 = go n0 where
 -- | Take bytes until they fail the predicate
 takeWhile
     :: (Monad m) => (Word8 -> Bool) -> Pipe BS.ByteString BS.ByteString m ()
-takeWhile predicate = go where
+takeWhile predicate = go
+  where
     go = do
         bs <- await
-        case BS.findIndex (not . predicate) bs of
-            Nothing -> do
+        let (prefix, suffix) = BS.span predicate bs
+        if (BS.null suffix)
+            then do
                 yield bs
                 go
-            Just i -> yield (BU.unsafeTake i bs)
+            else yield prefix
 {-# INLINABLE takeWhile #-}
 
 -- | Drop bytes until they fail the predicate
@@ -515,6 +526,99 @@ chunksOf n = go
             Right p' -> go p'
 {-# INLINABLE chunksOf #-}
 
+{-| Split a byte stream in two, where the first byte stream is the longest
+    consecutive group of bytes that satisfy the predicate
+-}
+span
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Producer BS.ByteString m r
+    -> Producer BS.ByteString m (Producer BS.ByteString m r)
+span predicate = go
+  where
+    go p = do
+        x <- lift (next p)
+        case x of
+            Left   r       -> return (return r)
+            Right (bs, p') -> do
+                let (prefix, suffix) = BS.span predicate bs
+                if (BS.null suffix)
+                    then do
+                        yield bs
+                        go p'
+                    else do
+                        yield prefix
+                        return (yield suffix >> p')
+{-# INLINABLE span #-}
+
+{-| Split a byte stream in two, where the first byte stream is the longest
+    consecutive group of bytes that satisfy the predicate
+-}
+break
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Producer BS.ByteString m r
+    -> Producer BS.ByteString m (Producer BS.ByteString m r)
+break predicate = span (not . predicate)
+{-# INLINABLE break #-}
+
+splitWith
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Producer BS.ByteString m r
+    -> PP.FreeT (Producer BS.ByteString m) m r
+splitWith predicate = go0
+  where
+    go0 p = PP.FreeT $ return $ PP.Free $ do
+        p' <- span predicate p
+        return $ PP.FreeT (go1 p')
+    go1 p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing       -> go1 p'
+                Just (_, bs') -> return $ PP.Free $ do
+                    p'' <- span predicate (yield bs' >> p')
+                    return $ PP.FreeT (go1 p'')
+{-# INLINABLE splitWith #-}
+
+split :: (Monad m)
+      => Word8
+      -> Producer BS.ByteString m r
+      -> PP.FreeT (Producer BS.ByteString m) m r
+split w8 = splitWith (w8 /=)
+{-# INLINABLE split #-}
+
+{-| Group a byte stream into 'FreeT'-delimited byte streams using the supplied
+    equality predicate
+-}
+groupBy
+    :: (Monad m)
+    => (Word8 -> Word8 -> Bool)
+    -> Producer BS.ByteString m r
+    -> PP.FreeT (Producer BS.ByteString m) m r
+groupBy equal p0 = PP.FreeT (go p0)
+  where
+    go p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing      -> go p'
+                Just (w8, _) -> do
+                    return $ PP.Free $ do
+                        p'' <- span (equal w8) (yield bs >> p')
+                        return $ PP.FreeT (go p'')
+{-# INLINABLE groupBy #-}
+
+-- | Group a byte stream into 'FreeT'-delimited byte streams of identical bytes
+group
+    :: (Monad m)
+    => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
+group = groupBy (==)
+{-# INLINABLE group #-}
+
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
     :: (Monad m)
@@ -582,7 +686,7 @@ draw = do
 {-# INLINABLE draw #-}
 
 {-| 'peek' checks the first non-empty 'BS.ByteString' in the stream, but uses
-    'PP.unDraw' to push the element back so that it is available for the next
+    'unDraw' to push the element back so that it is available for the next
     'draw' command:
 
 > peek = do
@@ -599,7 +703,7 @@ peek = do
     x <- draw
     case x of
         Left  _ -> return ()
-        Right a -> PP.unDraw a
+        Right a -> unDraw a
     return x
 {-# INLINABLE peek #-}
 
