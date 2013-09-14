@@ -16,8 +16,8 @@
 >     withFile "outFile.txt" WriteMode $ \hOut ->
 >     runEffect $ P.fromHandle hIn >-> P.toHandle hOut
 
-    You can also stream to and from 'stdin' and 'stdout' using the predefined
-    'stdin' and 'stdout' proxies, like in the following \"echo\" program:
+    You can stream to and from 'stdin' and 'stdout' using the predefined 'stdin'
+    and 'stdout' proxies, like in the following \"echo\" program:
 
 > main = runEffect $ P.stdin >-> stdout.P
 
@@ -28,13 +28,26 @@
 > main = runEffect $ P.fromLazy (BL.pack "Hello, world!\n") >-> P.stdout
 
     In addition, this module provides many functions equivalent to lazy
-    'ByteString' functions so that you can transform or fold byte streams.
+    'ByteString' functions so that you can transform or fold byte streams.  For
+    example, to stream only the first three lines of 'stdin' to 'stdout' you
+    would write:
+
+> import Pipes
+> import qualified Pipes.ByteString as PB
+> import qualified Pipes.Parse as PP
+>
+> main = runEffect $ takeLines 3 PB.stdin >-> PB.stdout
+>   where
+>     takeLines n = PB.unlines . PP.takeFree n . PB.lines
+
+    The above program will never bring more than one chunk (~ 32 kB) into
+    memory, no matter how long the lines are.
 
     Note that functions in this library are designed to operate on streams that
     are insensitive to chunk boundaries.  This means that they may freely split
     chunks into smaller chunks and /discard empty chunks/.  However, they will
-    /never concatenate chunks/ in order to provide strict memory-usage
-    guarantees.
+    /never concatenate chunks/ in order to provide strict upper bounds on memory
+    usage.
 -}
 
 module Pipes.ByteString (
