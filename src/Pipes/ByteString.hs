@@ -40,7 +40,7 @@
 >   where
 >     takeLines n = PB.unlines . PP.takeFree n . PB.lines
 
-    The above program will never bring more than one chunk (~ 32 kB) into
+    The above program will never bring more than one chunk (~ 32 KB) into
     memory, no matter how long the lines are.
 
     Note that functions in this library are designed to operate on streams that
