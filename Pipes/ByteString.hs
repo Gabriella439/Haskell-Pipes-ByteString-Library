@@ -132,10 +132,10 @@ import Pipes.Parse (input, concat)
 import Pipes.Safe (MonadSafe, Base)
 import Pipes.Safe.Prelude (withFile)
 import qualified Data.ByteString as BS
-import qualified Data.ByteString.Internal as BI
+import Data.ByteString.Internal (isSpaceWord8)
 import qualified Data.ByteString.Lazy as BL
-import qualified Data.ByteString.Lazy.Internal as BLI
-import qualified Data.ByteString.Unsafe as BU
+import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
+import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Word (Word8)
 import qualified System.IO as IO
 import qualified Data.List as List
@@ -170,7 +170,7 @@ import Prelude hiding (
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'BS.ByteString's
 fromLazy :: (Monad m) => BL.ByteString -> Producer' BS.ByteString m ()
-fromLazy bs = BLI.foldrChunks (\e a -> yield e >> a) (return ()) bs
+fromLazy bs = foldrChunks (\e a -> yield e >> a) (return ()) bs
 {-# INLINABLE fromLazy #-}
 
 -- | Stream bytes from 'stdin'
@@ -180,7 +180,7 @@ stdin = fromHandle IO.stdin
 
 -- | Convert a 'IO.Handle' into a byte stream using a default chunk size
 fromHandle :: MonadIO m => IO.Handle -> Producer' BS.ByteString m ()
-fromHandle = hGetSome BLI.defaultChunkSize
+fromHandle = hGetSome defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
 
@@ -267,7 +267,7 @@ take n0 = go n0 where
             bs <- await
             let len = fromIntegral (BS.length bs)
             if (len > n)
-                then yield (BU.unsafeTake (fromIntegral n) bs)
+                then yield (unsafeTake (fromIntegral n) bs)
                 else do
                     yield bs
                     go (n - len)
@@ -283,7 +283,7 @@ drop n0 = go n0 where
             let len = fromIntegral (BS.length bs)
             if (len >= n)
                 then do
-                    yield (BU.unsafeDrop (fromIntegral n) bs)
+                    yield (unsafeDrop (fromIntegral n) bs)
                     cat
                 else go (n - len)
 {-# INLINABLE drop #-}
@@ -312,7 +312,7 @@ dropWhile predicate = go where
         case BS.findIndex (not . predicate) bs of
             Nothing -> go
             Just i -> do
-                yield (BU.unsafeDrop i bs)
+                yield (unsafeDrop i bs)
                 cat
 {-# INLINABLE dropWhile #-}
 
@@ -696,7 +696,7 @@ lines p0 = PP.FreeT (go0 p0)
 words
     :: (Monad m)
     => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
-words p0 = removeEmpty (splitWith BI.isSpaceWord8 p0)
+words p0 = removeEmpty (splitWith isSpaceWord8 p0)
   where
     removeEmpty f = PP.FreeT $ do
         x <- PP.runFreeT f
