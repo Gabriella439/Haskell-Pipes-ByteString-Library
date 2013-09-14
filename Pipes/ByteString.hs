@@ -119,10 +119,9 @@ module Pipes.ByteString (
     module Pipes.Parse
     ) where
 
-import Control.Monad (liftM, unless, void)
-import Control.Monad.Trans.Class (lift)
+import Control.Monad (liftM)
 import Control.Monad.Trans.State.Strict (StateT, modify)
-import Data.Char (chr, ord, isSpace)
+import Data.Char (ord)
 import Data.Functor.Identity (Identity)
 import Pipes hiding (next)
 import qualified Pipes as P
@@ -319,7 +318,7 @@ dropWhile predicate = go where
 
 -- | Only allows 'Word8's to pass if they satisfy the predicate
 filter :: (Monad m) => (Word8 -> Bool) -> Pipe BS.ByteString BS.ByteString m r
-filter pred = P.map (BS.filter pred)
+filter predicate = P.map (BS.filter predicate)
 {-# INLINABLE filter #-}
 
 -- | Store a list of all indices whose elements match the given 'Word8'
@@ -347,7 +346,7 @@ scan step begin = go begin
   where
     go w8 = do
         bs <- await
-        let bs' = BS.scanl step begin bs
+        let bs' = BS.scanl step w8 bs
             w8' = BS.last bs'
         yield bs'
         go w8'
@@ -417,12 +416,12 @@ length = P.fold (\n bs -> n + fromIntegral (BS.length bs)) 0 id
 
 -- | Fold that returns whether 'M.Any' received 'Word8's satisfy the predicate
 any :: (Monad m) => (Word8 -> Bool) -> Producer BS.ByteString m () -> m Bool
-any pred = P.any (BS.any pred)
+any predicate = P.any (BS.any predicate)
 {-# INLINABLE any #-}
 
 -- | Fold that returns whether 'M.All' received 'Word8's satisfy the predicate
 all :: (Monad m) => (Word8 -> Bool) -> Producer BS.ByteString m () -> m Bool
-all pred = P.all (BS.all pred)
+all predicate = P.all (BS.all predicate)
 {-# INLINABLE all #-}
 
 -- | Return the maximum 'Word8' within a byte stream
@@ -684,8 +683,8 @@ lines p0 = PP.FreeT (go0 p0)
     go2 p = do
         x  <- next p
         return $ case x of
-            Left   r       -> PP.Pure r
-            Right (w8, p') -> PP.Free (go1 p')
+            Left   r      -> PP.Pure r
+            Right (_, p') -> PP.Free (go1 p')
 {-# INLINABLE lines #-}
 
 {-| Split a byte stream into 'FreeT'-delimited words
@@ -697,7 +696,7 @@ lines p0 = PP.FreeT (go0 p0)
 words
     :: (Monad m)
     => Producer BS.ByteString m r -> PP.FreeT (Producer BS.ByteString m) m r
-words p = removeEmpty (splitWith BI.isSpaceWord8 p)
+words p0 = removeEmpty (splitWith BI.isSpaceWord8 p0)
   where
     removeEmpty f = PP.FreeT $ do
         x <- PP.runFreeT f

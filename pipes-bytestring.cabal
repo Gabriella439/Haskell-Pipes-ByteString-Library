@@ -24,3 +24,4 @@ Library
         pipes-safe   >= 2.0.0   && < 2.1 ,
         transformers >= 0.2.0.0 && < 0.4
     Exposed-Modules: Pipes.ByteString
+    GHC-Options: -O2 -Wall
