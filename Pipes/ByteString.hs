@@ -516,14 +516,14 @@ splitAt
     :: (Monad m, Integral n)
     => n
     -> Producer BS.ByteString m r
-    -> Producer' BS.ByteString m (Either r (Producer BS.ByteString m r))
+    -> Producer' BS.ByteString m (Producer BS.ByteString m r)
 splitAt = go
   where
-    go 0 p = return (Right p)
+    go 0 p = return p
     go n p = do
         x <- lift (P.next p)
         case x of
-            Left   r       -> return (Left r)
+            Left   r       -> return (return r)
             Right (bs, p') -> do
                 let len = fromIntegral (BS.length bs)
                 if (len <= n)
@@ -533,7 +533,7 @@ splitAt = go
                     else do
                         let (prefix, suffix) = BS.splitAt (fromIntegral n) bs
                         yield prefix
-                        return $ Right (yield suffix >> p')
+                        return (yield suffix >> p')
 {-# INLINABLE splitAt #-}
 
 -- | Split a byte stream into 'PP.FreeT'-delimited byte streams of fixed size
@@ -542,13 +542,15 @@ chunksOf
     => n
     -> Producer BS.ByteString m r
     -> PP.FreeT (Producer BS.ByteString m) m r
-chunksOf n = go
+chunksOf n p0 = PP.FreeT (go p0)
   where
-    go p = PP.FreeT $ return $ PP.Free $ do
-        x <- splitAt n p
+    go p = do
+        x <- P.next p
         return $ case x of
-            Left  r  -> return r
-            Right p' -> go p'
+            Left   r       -> PP.Pure r
+            Right (bs, p') -> PP.Free $ do
+                p'' <- splitAt n (yield bs >> p')
+                return $ PP.FreeT (go p'')
 {-# INLINABLE chunksOf #-}
 
 {-| Split a byte stream in two, where the first byte stream is the longest
