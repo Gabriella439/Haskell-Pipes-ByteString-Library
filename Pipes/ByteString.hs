@@ -119,7 +119,7 @@ module Pipes.ByteString (
 
 import Control.Monad (liftM, unless, void)
 import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.State.Strict (StateT)
+import Control.Monad.Trans.State.Strict (StateT, modify)
 import Data.Char (chr, ord, isSpace)
 import Data.Functor.Identity (Identity)
 import Pipes hiding (next)
@@ -127,7 +127,7 @@ import qualified Pipes as P
 import Pipes.Core (respond, Server')
 import qualified Pipes.Prelude as P
 import qualified Pipes.Parse as PP
-import Pipes.Parse (unDraw, input, concat)
+import Pipes.Parse (input, concat)
 import Pipes.Safe (MonadSafe, Base)
 import Pipes.Safe.Prelude (withFile)
 import qualified Data.ByteString as BS
@@ -793,21 +793,25 @@ next = go
                 Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
 {-# INLINABLE next #-}
 
-{-| Draw one non-empty 'BS.ByteString' from the underlying 'Producer', returning
-    'Left' if the 'Producer' is empty
+{-| Draw one 'Word8' from the underlying 'Producer', returning 'Left' if the
+    'Producer' is empty
 -}
-draw
-    :: (Monad m)
-    => StateT (Producer BS.ByteString m r) m (Either r BS.ByteString)
+draw :: (Monad m) => StateT (Producer BS.ByteString m r) m (Either r Word8)
 draw = do
     x <- PP.draw
     case x of
         Left  r  -> return (Left r)
-        Right bs ->
-            if (BS.null bs)
-            then draw
-            else return (Right bs)
+        Right bs -> case (BS.uncons bs) of
+            Nothing        -> draw
+            Just (w8, bs') -> do
+                PP.unDraw bs'
+                return (Right w8)
 {-# INLINABLE draw #-}
+
+-- | Push back a 'Word8' onto the underlying 'Producer'
+unDraw :: (Monad m) => Word8 -> StateT (Producer BS.ByteString m r) m ()
+unDraw w8 = modify (yield (BS.singleton w8) >>)
+{-# INLINABLE unDraw #-}
 
 {-| 'peek' checks the first non-empty 'BS.ByteString' in the stream, but uses
     'unDraw' to push the element back so that it is available for the next
@@ -816,18 +820,16 @@ draw = do
 > peek = do
 >     x <- draw
 >     case x of
->         Left  _ -> return ()
->         Right a -> unDraw a
+>         Left  _  -> return ()
+>         Right w8 -> unDraw w8
 >     return x
 -}
-peek
-    :: (Monad m)
-    => StateT (Producer BS.ByteString m r) m (Either r BS.ByteString)
+peek :: (Monad m) => StateT (Producer BS.ByteString m r) m (Either r Word8)
 peek = do
     x <- draw
     case x of
-        Left  _ -> return ()
-        Right a -> unDraw a
+        Left  _  -> return ()
+        Right w8 -> unDraw w8
     return x
 {-# INLINABLE peek #-}
 
@@ -847,5 +849,5 @@ isEndOfInput = do
 {-# INLINABLE isEndOfInput #-}
 
 {- $reexports
-    @Pipes.Parse@ re-exports 'unDraw', 'input', and 'concat'
+    @Pipes.Parse@ re-exports 'input', and 'concat'
 -}
