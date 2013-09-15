@@ -123,6 +123,7 @@ module Pipes.ByteString (
     unwords,
 
     -- * Low-level Parsers
+    -- $parse
     next,
     draw,
     unDraw,
@@ -824,6 +825,11 @@ unwords
     => PP.FreeT (Producer ByteString m) m r -> Producer ByteString m r
 unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE unwords #-}
+
+{- $parse
+    The following parsing utilities are single-byte analogs of the ones found
+    in @pipes-parse@.
+-}
 
 {-| Consume the first byte from a byte stream
 
