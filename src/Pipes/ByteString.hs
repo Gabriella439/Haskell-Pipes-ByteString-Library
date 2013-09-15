@@ -19,7 +19,7 @@
     You can stream to and from 'stdin' and 'stdout' using the predefined 'stdin'
     and 'stdout' proxies, like in the following \"echo\" program:
 
-> main = runEffect $ P.stdin >-> stdout.P
+> main = runEffect $ P.stdin >-> P.stdout
 
     You can also translate pure lazy 'BL.ByteString's to and from proxies:
 
@@ -156,7 +156,7 @@ import qualified Pipes as P
 import Pipes hiding (next)
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
-import Pipes.Parse (input, concat)
+import Pipes.Parse (input, concat, FreeT)
 import qualified Pipes.Prelude as P
 import Pipes.Safe (MonadSafe, Base)
 import Pipes.Safe.Prelude (withFile)
@@ -573,10 +573,10 @@ splitAt = go
                         return (yield suffix >> p')
 {-# INLINABLE splitAt #-}
 
--- | Split a byte stream into 'PP.FreeT'-delimited byte streams of fixed size
+-- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
 chunksOf
     :: (Monad m, Integral n)
-    => n -> Producer ByteString m r -> PP.FreeT (Producer ByteString m) m r
+    => n -> Producer ByteString m r -> FreeT (Producer ByteString m) m r
 chunksOf n p0 = PP.FreeT (go p0)
   where
     go p = do
@@ -657,7 +657,7 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
 split :: (Monad m)
       => Word8
       -> Producer ByteString m r
-      -> PP.FreeT (Producer ByteString m) m r
+      -> FreeT (Producer ByteString m) m r
 split w8 = splitWith (w8 /=)
 {-# INLINABLE split #-}
 
@@ -668,7 +668,7 @@ groupBy
     :: (Monad m)
     => (Word8 -> Word8 -> Bool)
     -> Producer ByteString m r
-    -> PP.FreeT (Producer ByteString m) m r
+    -> FreeT (Producer ByteString m) m r
 groupBy equal p0 = PP.FreeT (go p0)
   where
     go p = do
@@ -685,20 +685,18 @@ groupBy equal p0 = PP.FreeT (go p0)
 
 -- | Group a byte stream into 'FreeT'-delimited byte streams of identical bytes
 group
-    :: (Monad m)
-    => Producer ByteString m r -> PP.FreeT (Producer ByteString m) m r
+    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
 group = groupBy (==)
 {-# INLINABLE group #-}
 
 {-| Split a byte stream into 'FreeT'-delimited lines
 
     Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Text' equivalent of this
-    function from the upcoming @pipes-text@ library.
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 lines
-    :: (Monad m)
-    => Producer ByteString m r -> PP.FreeT (Producer ByteString m) m r
+    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
 lines p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
@@ -722,12 +720,11 @@ lines p0 = PP.FreeT (go0 p0)
 {-| Split a byte stream into 'FreeT'-delimited words
 
     Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Text' equivalent of this
-    function from the upcoming @pipes-text@ library.
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 words
-    :: (Monad m)
-    => Producer ByteString m r -> PP.FreeT (Producer ByteString m) m r
+    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
 words p0 = removeEmpty (splitWith isSpaceWord8 p0)
   where
     removeEmpty f = PP.FreeT $ do
@@ -772,7 +769,7 @@ intersperse w8 = go0
 intercalate
     :: (Monad m)
     => Producer ByteString m ()
-    -> PP.FreeT (Producer ByteString m) m r
+    -> FreeT (Producer ByteString m) m r
     -> Producer ByteString m r
 intercalate p0 = go0
   where
@@ -796,12 +793,11 @@ intercalate p0 = go0
 {-| Join 'FreeT'-delimited lines into a byte stream
 
     Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Text' equivalent of this
-    function from the upcoming @pipes-text@ library.
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 unlines
-    :: (Monad m)
-    => PP.FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    :: (Monad m) => FreeT (Producer ByteString m) m r -> Producer ByteString m r
 unlines = go
   where
     go f = do
@@ -817,12 +813,11 @@ unlines = go
 {-| Join 'FreeT'-delimited words into a byte stream
 
     Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Text' equivalent of this
-    function from the upcoming @pipes-text@ library.
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 unwords
-    :: (Monad m)
-    => PP.FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    :: (Monad m) => FreeT (Producer ByteString m) m r -> Producer ByteString m r
 unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE unwords #-}
 
@@ -911,5 +906,5 @@ isEndOfInput = do
 
     @Data.Word@ re-exports the 'Word8' type.
 
-    @Pipes.Parse@ re-exports 'input', and 'concat'.
+    @Pipes.Parse@ re-exports 'input', 'concat', and 'FreeT' (the type).
 -}
