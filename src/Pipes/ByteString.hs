@@ -1,4 +1,4 @@
-{-# LANGUAGE RankNTypes, TypeFamilies #-}
+{-# LANGUAGE RankNTypes #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'ByteString's chunks.  Use byte streams to interact
@@ -98,10 +98,6 @@ module Pipes.ByteString (
     findIndex,
     count,
 
-    -- * Files
-    readFile,
-    writeFile,
-
     -- * Splitters
     splitAt,
     chunksOf,
@@ -158,8 +154,6 @@ import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
 import Pipes.Parse (input, concat, FreeT)
 import qualified Pipes.Prelude as P
-import Pipes.Safe (MonadSafe, Base)
-import Pipes.Safe.Prelude (withFile)
 import qualified System.IO as IO
 import Prelude hiding (
     all,
@@ -180,15 +174,13 @@ import Prelude hiding (
     minimum,
     notElem,
     null,
-    readFile,
     span,
     splitAt,
     take,
     takeWhile,
     unlines,
     unwords,
-    words,
-    writeFile )
+    words )
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'ByteString's
 fromLazy :: (Monad m) => BL.ByteString -> Producer' ByteString m ()
@@ -529,20 +521,6 @@ findIndex predicate p = P.head (p >-> findIndices predicate)
 count :: (Monad m, Num n) => Word8 -> Producer ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
-
-{-| Read bytes from a file, automatically opening and closing the file as
-    necessary
--}
-readFile :: (MonadSafe m, Base m ~ IO) => FilePath -> Producer' ByteString m ()
-readFile file = withFile file IO.ReadMode fromHandle
-{-# INLINABLE readFile #-}
-
-{-| Write bytes to a file, automatically opening and closing the file as
-    necessary
--}
-writeFile :: (MonadSafe m, Base m ~ IO) => FilePath -> Consumer' ByteString m r
-writeFile file = withFile file IO.WriteMode toHandle
-{-# INLINABLE writeFile #-}
 
 {-| Splits a 'Producer' after the given number of bytes
 
