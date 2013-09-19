@@ -120,11 +120,11 @@ module Pipes.ByteString (
 
     -- * Low-level Parsers
     -- $parse
-    next,
-    draw,
-    unDraw,
-    peek,
-    isEndOfInput,
+    nextByte,
+    drawByte,
+    unDrawByte,
+    peekByte,
+    isEndOfBytes,
     takeWhile',
 
     -- * Re-exports
@@ -149,8 +149,7 @@ import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
-import qualified Pipes as P
-import Pipes hiding (next)
+import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
 import Pipes.Parse (input, concat, FreeT)
@@ -413,7 +412,7 @@ head :: (Monad m) => Producer ByteString m () -> m (Maybe Word8)
 head = go
   where
     go p = do
-        x <- next p
+        x <- nextByte p
         case x of
             Left   _      -> return  Nothing
             Right (w8, _) -> return (Just w8)
@@ -424,7 +423,7 @@ last :: (Monad m) => Producer ByteString m () -> m (Maybe Word8)
 last = go Nothing
   where
     go r p = do
-        x <- P.next p
+        x <- next p
         case x of
             Left   ()      -> return r
             Right (bs, p') ->
@@ -537,7 +536,7 @@ splitAt = go
   where
     go 0 p = return p
     go n p = do
-        x <- lift (P.next p)
+        x <- lift (next p)
         case x of
             Left   r       -> return (return r)
             Right (bs, p') -> do
@@ -559,7 +558,7 @@ chunksOf
 chunksOf n p0 = PP.FreeT (go p0)
   where
     go p = do
-        x <- P.next p
+        x <- next p
         return $ case x of
             Left   r       -> PP.Pure r
             Right (bs, p') -> PP.Free $ do
@@ -578,7 +577,7 @@ span
 span predicate = go
   where
     go p = do
-        x <- lift (P.next p)
+        x <- lift (next p)
         case x of
             Left   r       -> return (return r)
             Right (bs, p') -> do
@@ -614,7 +613,7 @@ splitWith
 splitWith predicate p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
-        x <- P.next p
+        x <- next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') ->
@@ -624,7 +623,7 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
                     p'' <- span (not . predicate) (yield bs >> p')
                     return $ PP.FreeT (go1 p'')
     go1 p = do
-        x <- next p
+        x <- nextByte p
         return $ case x of
             Left   r      -> PP.Pure r
             Right (_, p') -> PP.Free $ do
@@ -651,7 +650,7 @@ groupBy
 groupBy equal p0 = PP.FreeT (go p0)
   where
     go p = do
-        x <- P.next p
+        x <- next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') -> case (BS.uncons bs) of
@@ -679,7 +678,7 @@ lines
 lines p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
-        x <- P.next p
+        x <- next p
         case x of
             Left   r       -> return (PP.Pure r)
             Right (bs, p') ->
@@ -711,7 +710,7 @@ words p0 = removeEmpty (splitWith isSpaceWord8 p0)
         case x of
             PP.Pure r -> return (PP.Pure r)
             PP.Free p -> do
-                y <- P.next p
+                y <- next p
                 case y of
                     Left   f'      -> PP.runFreeT (removeEmpty f')
                     Right (bs, p') -> return $ PP.Free $ do
@@ -726,14 +725,14 @@ intersperse
 intersperse w8 = go0
   where
     go0 p = do
-        x <- lift (P.next p)
+        x <- lift (next p)
         case x of
             Left   r       -> return r
             Right (bs, p') -> do
                 yield (BS.intersperse w8 bs)
                 go1 p'
     go1 p = do
-        x <- lift (P.next p)
+        x <- lift (next p)
         case x of
             Left   r       -> return r
             Right (bs, p') -> do
@@ -811,78 +810,78 @@ unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
     succeeds with a 'Right' providing the next byte and the remainder of the
     'Producer'.
 -}
-next
+nextByte
     :: (Monad m)
     => Producer ByteString m r
     -> m (Either r (Word8, Producer ByteString m r))
-next = go
+nextByte = go
   where
     go p = do
-        x <- P.next p
+        x <- next p
         case x of
             Left   r       -> return (Left r)
             Right (bs, p') -> case (BS.uncons bs) of
                 Nothing        -> go p'
                 Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
-{-# INLINABLE next #-}
+{-# INLINABLE nextByte #-}
 
 {-| Draw one 'Word8' from the underlying 'Producer', returning 'Left' if the
     'Producer' is empty
 -}
-draw :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
-draw = do
+drawByte :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
+drawByte = do
     x <- PP.draw
     case x of
         Left  r  -> return (Left r)
         Right bs -> case (BS.uncons bs) of
-            Nothing        -> draw
+            Nothing        -> drawByte
             Just (w8, bs') -> do
                 PP.unDraw bs'
                 return (Right w8)
-{-# INLINABLE draw #-}
+{-# INLINABLE drawByte #-}
 
 -- | Push back a 'Word8' onto the underlying 'Producer'
-unDraw :: (Monad m) => Word8 -> StateT (Producer ByteString m r) m ()
-unDraw w8 = modify (yield (BS.singleton w8) >>)
-{-# INLINABLE unDraw #-}
+unDrawByte :: (Monad m) => Word8 -> StateT (Producer ByteString m r) m ()
+unDrawByte w8 = modify (yield (BS.singleton w8) >>)
+{-# INLINABLE unDrawByte #-}
 
-{-| 'peek' checks the first 'Word8' in the stream, but uses 'unDraw' to push the
-    'Word8' back so that it is available for the next 'draw' command:
+{-| 'peekByte' checks the first 'Word8' in the stream, but uses 'unDrawByte' to
+    push the 'Word8' back
 
-> peek = do
->     x <- draw
+> peekByte = do
+>     x <- drawByte
 >     case x of
 >         Left  _  -> return ()
->         Right w8 -> unDraw w8
+>         Right w8 -> unDrawByte w8
 >     return x
 -}
-peek :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
-peek = do
-    x <- draw
+peekByte :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
+peekByte = do
+    x <- drawByte
     case x of
         Left  _  -> return ()
-        Right w8 -> unDraw w8
+        Right w8 -> unDrawByte w8
     return x
-{-# INLINABLE peek #-}
+{-# INLINABLE peekByte #-}
 
 {-| Check if the underlying 'Producer' has no more bytes
 
-    Note that this will skip over empty 'ByteString's, unlike 'PP.isEndOfInput'
-    from @pipes-parse@.
+    Note that this will skip over empty 'ByteString' chunks, unlike
+    'PP.isEndOfInput' from @pipes-parse@.
 
-> isEndOfInput = liftM isLeft peek
+> isEndOfBytes = liftM isLeft peekByte
 -}
-isEndOfInput :: (Monad m) => StateT (Producer ByteString m r) m Bool
-isEndOfInput = do
-    x <- peek
+isEndOfBytes :: (Monad m) => StateT (Producer ByteString m r) m Bool
+isEndOfBytes = do
+    x <- peekByte
     return (case x of
         Left  _ -> True
         Right _ -> False )
-{-# INLINABLE isEndOfInput #-}
+{-# INLINABLE isEndOfBytes #-}
 
 {-| Take bytes until they fail the predicate
 
-    Unlike 'takeWhile', this 'unDraw's unused bytes
+    Unlike 'takeWhile', this 'PP.unDraw's unused bytes
 -}
 takeWhile'
     :: (Monad m)
