@@ -125,6 +125,7 @@ module Pipes.ByteString (
     unDraw,
     peek,
     isEndOfInput,
+    takeWhile',
 
     -- * Re-exports
     -- $reexports
@@ -878,6 +879,28 @@ isEndOfInput = do
         Left  _ -> True
         Right _ -> False )
 {-# INLINABLE isEndOfInput #-}
+
+{-| Take bytes until they fail the predicate
+
+    Unlike 'takeWhile', this 'unDraw's unused bytes
+-}
+takeWhile'
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
+takeWhile' predicate = go
+  where
+    go = do
+        bs <- await
+        let (prefix, suffix) = BS.span predicate bs
+        if (BS.null suffix)
+            then do
+                yield bs
+                go
+            else do
+                lift $ PP.unDraw suffix
+                yield prefix
+{-# INLINABLE takeWhile' #-}
 
 {- $reexports
     @Data.ByteString@ re-exports the 'ByteString' type.
