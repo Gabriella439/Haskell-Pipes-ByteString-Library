@@ -694,7 +694,7 @@ lines p0 = PP.FreeT (go0 p0)
         p' <- break (fromIntegral (ord '\n') ==) p
         return $ PP.FreeT (go2 p')
     go2 p = do
-        x  <- next p
+        x  <- nextByte p
         return $ case x of
             Left   r      -> PP.Pure r
             Right (_, p') -> PP.Free (go1 p')
