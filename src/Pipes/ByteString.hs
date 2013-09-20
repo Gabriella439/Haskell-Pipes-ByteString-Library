@@ -198,7 +198,11 @@ fromHandle = hGetSome defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
 
--- | Convert a handle into a byte stream using a fixed chunk size
+{-| Convert a handle into a byte stream using a maximum chunk size
+
+    'hGetSome' forwards input immediately as it becomes available, splitting the
+    input into multiple chunks if it exceeds the maximum chunk size.
+-}
 hGetSome :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
 hGetSome size h = go where
     go = do
@@ -211,7 +215,11 @@ hGetSome size h = go where
                 go
 {-# INLINABLE hGetSome #-}
 
--- | Convert a handle into a byte stream using a fixed chunk size
+{-| Convert a handle into a byte stream using a fixed chunk size
+
+    'hGet' waits until exactly the requested number of bytes are available for
+    each chunk.
+-}
 hGet :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
 hGet size h = go where
     go = do
@@ -224,7 +232,8 @@ hGet size h = go where
                 go
 {-# INLINABLE hGet #-}
 
--- | Convert a handle into a byte stream that serves variable chunk sizes
+{-| Like 'hGetSome', except you can vary the maximum chunk size for each request
+-}
 hGetSomeN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
 hGetSomeN h = go where
     go size = do
@@ -237,7 +246,7 @@ hGetSomeN h = go where
                 go size2
 {-# INLINABLE hGetSomeN #-}
 
--- | Convert a handle into a byte stream that serves variable chunk sizes
+-- | Like 'hGet', except you can vary the chunk size for each request
 hGetN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
 hGetN h = go where
     go size = do
@@ -353,12 +362,12 @@ filter :: (Monad m) => (Word8 -> Bool) -> Pipe ByteString ByteString m r
 filter predicate = P.map (BS.filter predicate)
 {-# INLINABLE filter #-}
 
--- | Store a list of all indices whose elements match the given 'Word8'
+-- | Stream all indices whose elements match the given 'Word8'
 elemIndices :: (Monad m, Num n) => Word8 -> Pipe ByteString n m r
 elemIndices w8 = findIndices (w8 ==)
 {-# INLINABLE elemIndices #-}
 
--- | Store a list of all indices whose elements satisfy the given predicate
+-- | Stream all indices whose elements satisfy the given predicate
 findIndices :: (Monad m, Num n) => (Word8 -> Bool) -> Pipe ByteString n m r
 findIndices predicate = go 0
   where
@@ -522,11 +531,7 @@ count :: (Monad m, Num n) => Word8 -> Producer ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
 
-{-| Splits a 'Producer' after the given number of bytes
-
-    @(splitAt n p)@ returns remainder of the bytes if @p@ had at least @n@ bytes
-    or returns 'Left' if @p@ had an insufficient number of bytes.
--}
+-- | Splits a 'Producer' after the given number of bytes
 splitAt
     :: (Monad m, Integral n)
     => n
@@ -592,7 +597,7 @@ span predicate = go
 {-# INLINABLE span #-}
 
 {-| Split a byte stream in two, where the first byte stream is the longest
-    consecutive group of bytes that satisfy the predicate
+    consecutive group of bytes that don't satisfy the predicate
 -}
 break
     :: (Monad m)
