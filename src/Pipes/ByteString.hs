@@ -125,6 +125,7 @@ module Pipes.ByteString (
     unDrawByte,
     peekByte,
     isEndOfBytes,
+    take',
     takeWhile',
 
     -- * Re-exports
@@ -883,6 +884,27 @@ isEndOfBytes = do
         Left  _ -> True
         Right _ -> False )
 {-# INLINABLE isEndOfBytes #-}
+
+{-| @(take' n)@ only allows @n@ bytes to pass
+
+    Unlike 'take', this 'PP.unDraw's unused bytes
+-}
+take' :: (Monad m, Integral a) => a -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
+take' n0 = go n0 where
+    go n
+        | n <= 0    = return ()
+        | otherwise = do
+            bs <- await
+            let len = fromIntegral (BS.length bs)
+            if (len > n)
+                then do
+                    let n' = fromIntegral n
+                    lift . PP.unDraw $ unsafeDrop n' bs
+                    yield $ unsafeTake n' bs
+                else do
+                    yield bs
+                    go (n - len)
+{-# INLINABLE take' #-}
 
 {-| Take bytes until they fail the predicate
 
