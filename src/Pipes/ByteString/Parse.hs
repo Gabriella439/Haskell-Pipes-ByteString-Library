@@ -7,17 +7,19 @@ module Pipes.ByteString.Parse (
     unDrawByte,
     peekByte,
     isEndOfBytes,
+    take,
     takeWhile
     ) where
 
 import Control.Monad.Trans.State.Strict (StateT, modify)
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
+import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Word (Word8)
 import Pipes
 import qualified Pipes.Parse as PP
 
-import Prelude hiding (takeWhile)
+import Prelude hiding (take, takeWhile)
 
 {-| Consume the first byte from a byte stream
 
@@ -93,6 +95,27 @@ isEndOfBytes = do
         Left  _ -> True
         Right _ -> False )
 {-# INLINABLE isEndOfBytes #-}
+
+{-| @(take n)@ only allows @n@ bytes to pass
+
+    Unlike 'take', this 'PP.unDraw's unused bytes
+-}
+take :: (Monad m, Integral a) => a -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
+take n0 = go n0 where
+    go n
+        | n <= 0 = return ()
+        | otherwise = do
+            bs <- await
+            let len = fromIntegral (BS.length bs)
+            if (len > n)
+                then do
+                    let n' = fromIntegral n
+                    lift . PP.unDraw $ unsafeDrop n' bs
+                    yield $ unsafeTake n' bs
+                else do
+                    yield bs
+                    go (n - len)
+{-# INLINABLE take #-}
 
 {-| Take bytes until they fail the predicate
 
