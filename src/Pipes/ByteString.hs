@@ -644,7 +644,7 @@ split :: (Monad m)
       => Word8
       -> Producer ByteString m r
       -> FreeT (Producer ByteString m) m r
-split w8 = splitWith (w8 /=)
+split w8 = splitWith (w8 ==)
 {-# INLINABLE split #-}
 
 {-| Group a byte stream into 'FreeT'-delimited byte streams using the supplied
