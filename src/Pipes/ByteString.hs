@@ -319,7 +319,7 @@ take n0 = go n0 where
                     go (n - len)
 {-# INLINABLE take #-}
 
--- | @(dropD n)@ drops the first @n@ bytes
+-- | @(drop n)@ drops the first @n@ bytes
 drop :: (Monad m, Integral a) => a -> Pipe ByteString ByteString m r
 drop n0 = go n0 where
     go n
