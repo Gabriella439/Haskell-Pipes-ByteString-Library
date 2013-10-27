@@ -57,6 +57,7 @@ module Pipes.ByteString (
     fromHandle,
     hGetSome,
     hGet,
+    pack,
 
     -- * Servers
     hGetSomeN,
@@ -77,6 +78,7 @@ module Pipes.ByteString (
     elemIndices,
     findIndices,
     scan,
+    unpack,
 
     -- * Folds
     toLazy,
@@ -154,8 +156,9 @@ import qualified Pipes.ByteString.Parse as PBP
 import Pipes.ByteString.Parse (
     nextByte, drawByte, unDrawByte, peekByte, isEndOfBytes )
 import Pipes.Core (respond, Server')
+import Pipes.Lift (evalStateP)
 import qualified Pipes.Parse as PP
-import Pipes.Parse (input, concat, FreeT)
+import Pipes.Parse (input, concat, FreeT, isEndOfInput)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
@@ -234,6 +237,19 @@ hGet size h = go where
                 yield bs
                 go
 {-# INLINABLE hGet #-}
+
+-- | Convert a 'Word8' producer into a byte stream using a default chunk size
+pack :: Monad m => Producer Word8 m () -> Producer ByteString m ()
+pack p = evalStateP p go where
+    go = do
+        eof <- lift isEndOfInput
+        if eof
+            then return ()
+            else do
+                bytes <- lift $ P.toListM (P.take defaultChunkSize <-< input)
+                yield $ BS.pack bytes
+                go
+{-# INLINABLE pack #-}
 
 {-| Like 'hGetSome', except you can vary the maximum chunk size for each request
 -}
@@ -393,6 +409,11 @@ scan step begin = go begin
         yield bs'
         go w8'
 {-# INLINABLE scan #-}
+
+-- | Unpack the bytes
+unpack :: Monad m => Pipe ByteString Word8 m ()
+unpack = for cat (mapM_ yield . BS.unpack)
+{-# INLINABLE unpack #-}
 
 {-| Fold a pure 'Producer' of strict 'ByteString's into a lazy
     'BL.ByteString'
