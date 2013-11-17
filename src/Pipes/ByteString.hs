@@ -1,4 +1,9 @@
-{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE RankNTypes, CPP #-}
+
+-- The rewrite rules require the Trustworthy annotation
+#if __GLASGOW_HASKELL__ >= 702
+{-# LANGUAGE Trustworthy #-}
+#endif
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'ByteString's chunks.  Use byte streams to interact
@@ -309,6 +314,10 @@ toHandle :: MonadIO m => IO.Handle -> Consumer' ByteString m r
 toHandle h = for cat (liftIO . BS.hPut h)
 {-# INLINABLE toHandle #-}
 
+{-# RULES "p >-> toHandle h" forall p h .
+        p >-> toHandle h = for p (\bs -> liftIO (BS.hPut h bs))
+  #-}
+
 -- | Apply a transformation to each 'Word8' in the stream
 map :: (Monad m) => (Word8 -> Word8) -> Pipe ByteString ByteString m r
 map f = P.map (BS.map f)
@@ -414,6 +423,11 @@ scan step begin = go begin
 unpack :: Monad m => Pipe ByteString Word8 m ()
 unpack = for cat (mapM_ yield . BS.unpack)
 {-# INLINABLE unpack #-}
+
+{-# RULES
+    "p >-> unpack" forall p .
+        p >-> unpack = for p (\bs -> mapM_ yield (BS.unpack bs))
+  #-}
 
 {-| Fold a pure 'Producer' of strict 'ByteString's into a lazy
     'BL.ByteString'
