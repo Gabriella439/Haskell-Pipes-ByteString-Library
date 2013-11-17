@@ -731,20 +731,15 @@ lines p0 = PP.FreeT (go0 p0)
 -}
 words
     :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
-words p0 = removeEmpty (splitWith isSpaceWord8 p0)
+words = go
   where
-    removeEmpty f = PP.FreeT $ do
-        x <- PP.runFreeT f
-        case x of
-            PP.Pure r -> return (PP.Pure r)
-            PP.Free p -> do
-                y <- next p
-                case y of
-                    Left   f'      -> PP.runFreeT (removeEmpty f')
-                    Right (bs, p') -> return $ PP.Free $ do
-                        yield bs
-                        f' <- p'
-                        return (removeEmpty f')
+    go p = PP.FreeT $ do
+        x <- next (p >-> dropWhile isSpaceWord8)
+        return $ case x of
+            Left   r       -> PP.Pure r
+            Right (bs, p') -> PP.Free $ do
+                p'' <- break isSpaceWord8 (yield bs >> p')
+                return (go p'')
 {-# INLINABLE words #-}
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
