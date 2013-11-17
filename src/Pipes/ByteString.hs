@@ -446,9 +446,9 @@ head = go
   where
     go p = do
         x <- nextByte p
-        case x of
-            Left   _      -> return  Nothing
-            Right (w8, _) -> return (Just w8)
+        return $ case x of
+            Left   _      -> Nothing
+            Right (w8, _) -> Just w8
 {-# INLINABLE head #-}
 
 -- | Retrieve the last 'Word8'
@@ -460,9 +460,7 @@ last = go Nothing
         case x of
             Left   ()      -> return r
             Right (bs, p') ->
-                if (BS.null bs)
-                then go r p'
-                else go (Just $ BS.last bs) p'
+                go (if BS.null bs then r else (Just $ BS.last bs)) p'
                 -- TODO: Change this to 'unsafeLast' when bytestring-0.10.2.0
                 --       becomes more widespread
 {-# INLINABLE last #-}
@@ -584,15 +582,15 @@ splitAt = go
 chunksOf
     :: (Monad m, Integral n)
     => n -> Producer ByteString m r -> FreeT (Producer ByteString m) m r
-chunksOf n p0 = PP.FreeT (go p0)
+chunksOf n = go
   where
-    go p = do
+    go p = PP.FreeT $ do
         x <- next p
         return $ case x of
             Left   r       -> PP.Pure r
             Right (bs, p') -> PP.Free $ do
                 p'' <- splitAt n (yield bs >> p')
-                return $ PP.FreeT (go p'')
+                return (go p'')
 {-# INLINABLE chunksOf #-}
 
 {-| Split a byte stream in two, where the first byte stream is the longest
@@ -601,7 +599,7 @@ chunksOf n p0 = PP.FreeT (go p0)
 span
     :: (Monad m)
     => (Word8 -> Bool)
-    -> Producer ByteString m r
+    -> Producer  ByteString m  r
     -> Producer' ByteString m (Producer ByteString m r)
 span predicate = go
   where
@@ -626,7 +624,7 @@ span predicate = go
 break
     :: (Monad m)
     => (Word8 -> Bool)
-    -> Producer ByteString m r
+    -> Producer ByteString m  r
     -> Producer ByteString m (Producer ByteString m r)
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
@@ -648,16 +646,14 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
             Right (bs, p') ->
                 if (BS.null bs)
                 then go0 p'
-                else return $ PP.Free $ do
-                    p'' <- span (not . predicate) (yield bs >> p')
-                    return $ PP.FreeT (go1 p'')
-    go1 p = do
-        x <- nextByte p
-        return $ case x of
-            Left   r      -> PP.Pure r
-            Right (_, p') -> PP.Free $ do
-                    p'' <- span (not . predicate) p'
-                    return $ PP.FreeT (go1 p'')
+                else go1 (yield bs >> p')
+    go1 p = return $ PP.Free $ do
+        p' <- span (not . predicate) p
+        return $ PP.FreeT $ do
+            x <- nextByte p'
+            case x of
+                Left   r       -> return (PP.Pure r)
+                Right (_, p'') -> go1 p''
 {-# INLINABLE splitWith #-}
 
 -- | Split a byte stream using the given 'Word8' as the delimiter
