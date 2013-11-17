@@ -98,7 +98,8 @@ isEndOfBytes = do
 
 {-| @(take n)@ only allows @n@ bytes to pass
 
-    Unlike 'take', this 'PP.unDraw's unused bytes
+    Unlike @Pipes.ByteString.'Pipes.ByteString.take'@, this 'PP.unDraw's unused
+    bytes
 -}
 take :: (Monad m, Integral a) => a -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
 take n0 = go n0 where
@@ -119,7 +120,8 @@ take n0 = go n0 where
 
 {-| Take bytes until they fail the predicate
 
-    Unlike 'takeWhile', this 'PP.unDraw's unused bytes
+    Unlike @Pipes.ByteString.'Pipes.ByteString.takeWhile'@, this 'PP.unDraw's
+    unused bytes
 -}
 takeWhile
     :: (Monad m)
