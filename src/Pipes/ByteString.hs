@@ -716,12 +716,11 @@ lines p0 = PP.FreeT (go0 p0)
                 else return $ PP.Free $ go1 (yield bs >> p')
     go1 p = do
         p' <- break (fromIntegral (ord '\n') ==) p
-        return $ PP.FreeT (go2 p')
-    go2 p = do
-        x  <- nextByte p
-        return $ case x of
-            Left   r      -> PP.Pure r
-            Right (_, p') -> PP.Free (go1 p')
+        return $ PP.FreeT $ do
+            x  <- nextByte p'
+            case x of
+                Left   r       -> return (PP.Pure r)
+                Right (_, p'') -> go0 p''
 {-# INLINABLE lines #-}
 
 {-| Split a byte stream into 'FreeT'-delimited words
