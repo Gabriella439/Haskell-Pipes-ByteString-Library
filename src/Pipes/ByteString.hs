@@ -57,88 +57,88 @@
 
 module Pipes.ByteString (
     -- * Producers
-    fromLazy,
-    stdin,
-    fromHandle,
-    hGetSome,
-    hGet,
-    pack,
+      fromLazy
+    , stdin
+    , fromHandle
+    , hGetSome
+    , hGet
+    , pack
 
     -- * Servers
-    hGetSomeN,
-    hGetN,
+    , hGetSomeN
+    , hGetN
 
     -- * Consumers
-    stdout,
-    toHandle,
+    , stdout
+    , toHandle
 
     -- * Pipes
-    map,
-    concatMap,
-    take,
-    drop,
-    takeWhile,
-    dropWhile,
-    filter,
-    elemIndices,
-    findIndices,
-    scan,
-    unpack,
+    , map
+    , concatMap
+    , take
+    , drop
+    , takeWhile
+    , dropWhile
+    , filter
+    , elemIndices
+    , findIndices
+    , scan
+    , unpack
 
     -- * Folds
-    toLazy,
-    toLazyM,
-    fold,
-    head,
-    last,
-    null,
-    length,
-    any,
-    all,
-    maximum,
-    minimum,
-    elem,
-    notElem,
-    find,
-    index,
-    elemIndex,
-    findIndex,
-    count,
+    , toLazy
+    , toLazyM
+    , fold
+    , head
+    , last
+    , null
+    , length
+    , any
+    , all
+    , maximum
+    , minimum
+    , elem
+    , notElem
+    , find
+    , index
+    , elemIndex
+    , findIndex
+    , count
 
     -- * Splitters
-    splitAt,
-    chunksOf,
-    span,
-    break,
-    splitWith,
-    split,
-    groupBy,
-    group,
-    lines,
-    words,
+    , splitAt
+    , chunksOf
+    , span
+    , break
+    , splitWith
+    , split
+    , groupBy
+    , group
+    , lines
+    , words
 
     -- * Transformations
-    intersperse,
+    , intersperse
 
     -- * Joiners
-    intercalate,
-    unlines,
-    unwords,
+    , intercalate
+    , unlines
+    , unwords
 
     -- * Low-level Parsers
     -- $parse
-    nextByte,
-    drawByte,
-    unDrawByte,
-    peekByte,
-    isEndOfBytes,
-    takeWhile',
+    , nextByte
+    , drawByte
+    , unDrawByte
+    , peekByte
+    , isEndOfBytes
+    , takeWhile'
 
     -- * Re-exports
     -- $reexports
-    module Data.ByteString,
-    module Data.Word,
-    module Pipes.Parse
+    , module Data.ByteString
+    , module Data.Word
+    , module Pipes.Parse
     ) where
 
 import Control.Exception (throwIO, try)
@@ -167,31 +167,32 @@ import Pipes.Parse (input, concat, FreeT, isEndOfInput)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
-    all,
-    any,
-    break,
-    concat,
-    concatMap,
-    drop,
-    dropWhile,
-    elem,
-    filter,
-    head,
-    last,
-    lines,
-    length,
-    map,
-    maximum,
-    minimum,
-    notElem,
-    null,
-    span,
-    splitAt,
-    take,
-    takeWhile,
-    unlines,
-    unwords,
-    words )
+      all
+    , any
+    , break
+    , concat
+    , concatMap
+    , drop
+    , dropWhile
+    , elem
+    , filter
+    , head
+    , last
+    , lines
+    , length
+    , map
+    , maximum
+    , minimum
+    , notElem
+    , null
+    , span
+    , splitAt
+    , take
+    , takeWhile
+    , unlines
+    , unwords
+    , words
+    )
 
 -- | Convert a lazy 'BL.ByteString' into a 'Producer' of strict 'ByteString's
 fromLazy :: (Monad m) => BL.ByteString -> Producer' ByteString m ()

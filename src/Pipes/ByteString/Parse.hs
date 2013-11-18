@@ -2,13 +2,13 @@
 
 module Pipes.ByteString.Parse (
     -- * Parsers
-    nextByte,
-    drawByte,
-    unDrawByte,
-    peekByte,
-    isEndOfBytes,
-    take,
-    takeWhile
+      nextByte
+    , drawByte
+    , unDrawByte
+    , peekByte
+    , isEndOfBytes
+    , take
+    , takeWhile
     ) where
 
 import Control.Monad.Trans.State.Strict (StateT, modify)
