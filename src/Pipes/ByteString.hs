@@ -216,13 +216,13 @@ fromHandle = hGetSome defaultChunkSize
     input into multiple chunks if it exceeds the maximum chunk size.
 -}
 hGetSome :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
-hGetSome size h = go where
+hGetSome size h = go
+  where
     go = do
-        eof <- liftIO (IO.hIsEOF h)
-        if eof
+        bs <- liftIO (BS.hGetSome h size)
+        if (BS.null bs)
             then return ()
             else do
-                bs <- liftIO (BS.hGetSome h size)
                 yield bs
                 go
 {-# INLINABLE hGetSome #-}
@@ -233,13 +233,13 @@ hGetSome size h = go where
     each chunk.
 -}
 hGet :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
-hGet size h = go where
+hGet size h = go
+  where
     go = do
-        eof <- liftIO (IO.hIsEOF h)
-        if eof
+        bs <- liftIO (BS.hGet h size)
+        if (BS.null bs)
             then return ()
             else do
-                bs <- liftIO (BS.hGet h size)
                 yield bs
                 go
 {-# INLINABLE hGet #-}
@@ -260,26 +260,26 @@ pack p = evalStateP p go where
 {-| Like 'hGetSome', except you can vary the maximum chunk size for each request
 -}
 hGetSomeN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
-hGetSomeN h = go where
+hGetSomeN h = go
+  where
     go size = do
-        eof <- liftIO (IO.hIsEOF h)
-        if eof
+        bs <- liftIO (BS.hGetSome h size)
+        if (BS.null bs)
             then return ()
             else do
-                bs    <- liftIO (BS.hGetSome h size)
                 size2 <- respond bs
                 go size2
 {-# INLINABLE hGetSomeN #-}
 
 -- | Like 'hGet', except you can vary the chunk size for each request
 hGetN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
-hGetN h = go where
+hGetN h = go
+  where
     go size = do
-        eof <- liftIO (IO.hIsEOF h)
-        if eof
+        bs <- liftIO (BS.hGet h size)
+        if (BS.null bs)
             then return ()
             else do
-                bs    <- liftIO (BS.hGet h size)
                 size2 <- respond bs
                 go size2
 {-# INLINABLE hGetN #-}
