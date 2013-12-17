@@ -1,5 +1,7 @@
 -- | Parsing utilities for bytestrings, in the style of @pipes-parse@
 
+{-# LANGUAGE RankNTypes #-}
+
 module Pipes.ByteString.Parse (
     -- * Parsers
       nextByte
@@ -7,17 +9,17 @@ module Pipes.ByteString.Parse (
     , unDrawByte
     , peekByte
     , isEndOfBytes
-    , take
-    , takeWhile
+--  , take
+--  , takeWhile
     ) where
 
-import Control.Monad.Trans.State.Strict (StateT, modify)
+import Control.Monad.Trans.State.Strict (modify)
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
-import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
+-- import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Word (Word8)
 import Pipes
-import qualified Pipes.Parse as PP
+import Pipes.Parse (Parser, draw, unDraw)
 
 import Prelude hiding (take, takeWhile)
 
@@ -45,20 +47,20 @@ nextByte = go
 {-| Draw one 'Word8' from the underlying 'Producer', returning 'Left' if the
     'Producer' is empty
 -}
-drawByte :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
+drawByte :: (Monad m) => Parser ByteString m (Maybe Word8)
 drawByte = do
-    x <- PP.draw
+    x <- draw
     case x of
-        Left  r  -> return (Left r)
-        Right bs -> case (BS.uncons bs) of
+        Nothing -> return Nothing
+        Just bs -> case (BS.uncons bs) of
             Nothing        -> drawByte
             Just (w8, bs') -> do
-                PP.unDraw bs'
-                return (Right w8)
+                unDraw bs'
+                return (Just w8)
 {-# INLINABLE drawByte #-}
 
 -- | Push back a 'Word8' onto the underlying 'Producer'
-unDrawByte :: (Monad m) => Word8 -> StateT (Producer ByteString m r) m ()
+unDrawByte :: (Monad m) => Word8 -> Parser ByteString m ()
 unDrawByte w8 = modify (yield (BS.singleton w8) >>)
 {-# INLINABLE unDrawByte #-}
 
@@ -68,37 +70,38 @@ unDrawByte w8 = modify (yield (BS.singleton w8) >>)
 > peekByte = do
 >     x <- drawByte
 >     case x of
->         Left  _  -> return ()
->         Right w8 -> unDrawByte w8
+>         Nothing -> return ()
+>         Just w8 -> unDrawByte w8
 >     return x
 -}
-peekByte :: (Monad m) => StateT (Producer ByteString m r) m (Either r Word8)
+peekByte :: (Monad m) => Parser ByteString m (Maybe Word8)
 peekByte = do
     x <- drawByte
     case x of
-        Left  _  -> return ()
-        Right w8 -> unDrawByte w8
+        Nothing -> return ()
+        Just w8 -> unDrawByte w8
     return x
 {-# INLINABLE peekByte #-}
 
 {-| Check if the underlying 'Producer' has no more bytes
 
     Note that this will skip over empty 'ByteString' chunks, unlike
-    'PP.isEndOfInput' from @pipes-parse@.
+    'Pipes.Parse.isEndOfInput' from @pipes-parse@.
 
-> isEndOfBytes = liftM isLeft peekByte
+> isEndOfBytes = liftM isNothing peekByte
 -}
-isEndOfBytes :: (Monad m) => StateT (Producer ByteString m r) m Bool
+isEndOfBytes :: (Monad m) => Parser ByteString m Bool
 isEndOfBytes = do
     x <- peekByte
     return (case x of
-        Left  _ -> True
-        Right _ -> False )
+        Nothing -> True
+        Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
+{-
 {-| @(take n)@ only allows @n@ bytes to pass
 
-    Unlike @Pipes.ByteString.'Pipes.ByteString.take'@, this 'PP.unDraw's unused
+    Unlike @Pipes.ByteString.'Pipes.ByteString.take'@, this 'unDraw's unused
     bytes
 -}
 take :: (Monad m, Integral a) => a -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
@@ -111,7 +114,7 @@ take n0 = go n0 where
             if (len > n)
                 then do
                     let n' = fromIntegral n
-                    lift . PP.unDraw $ unsafeDrop n' bs
+                    lift . unDraw $ unsafeDrop n' bs
                     yield $ unsafeTake n' bs
                 else do
                     yield bs
@@ -120,7 +123,7 @@ take n0 = go n0 where
 
 {-| Take bytes until they fail the predicate
 
-    Unlike @Pipes.ByteString.'Pipes.ByteString.takeWhile'@, this 'PP.unDraw's
+    Unlike @Pipes.ByteString.'Pipes.ByteString.takeWhile'@, this 'unDraw's
     unused bytes
 -}
 takeWhile
@@ -137,6 +140,7 @@ takeWhile predicate = go
                 yield bs
                 go
             else do
-                lift $ PP.unDraw suffix
+                lift $ unDraw suffix
                 yield prefix
 {-# INLINABLE takeWhile #-}
+-}

@@ -37,13 +37,12 @@
     example, to stream only the first three lines of 'stdin' to 'stdout' you
     would write:
 
+> import Lens.Family (over)
 > import Pipes
 > import qualified Pipes.ByteString as PB
-> import qualified Pipes.Parse      as PP
+> import Pipes.Parse (takes)
 >
-> main = runEffect $ takeLines 3 PB.stdin >-> PB.stdout
->   where
->     takeLines n = PB.unlines . PP.takeFree n . PB.lines
+> main = runEffect $ over PB.lines (takes 3) PB.stdin >-> PB.stdout
 
     The above program will never bring more than one chunk (~ 32 KB) into
     memory, no matter how long the lines are.
@@ -62,7 +61,6 @@ module Pipes.ByteString (
     , fromHandle
     , hGetSome
     , hGet
-    , pack
 
     -- * Servers
     , hGetSomeN
@@ -83,7 +81,6 @@ module Pipes.ByteString (
     , elemIndices
     , findIndices
     , scan
-    , unpack
 
     -- * Folds
     , toLazy
@@ -105,25 +102,26 @@ module Pipes.ByteString (
     , findIndex
     , count
 
-    -- * Splitters
+    -- * Parsing lenses
     , splitAt
-    , chunksOf
     , span
     , break
+
+    -- * Splitters
     , splitWith
     , split
+    , chunksOf
     , groupBy
     , group
     , lines
     , words
 
-    -- * Transformations
+    -- * Transforming Byte Streams
     , intersperse
+    , pack
 
     -- * Joiners
     , intercalate
-    , unlines
-    , unwords
 
     -- * Low-level Parsers
     -- $parse
@@ -132,18 +130,17 @@ module Pipes.ByteString (
     , unDrawByte
     , peekByte
     , isEndOfBytes
-    , takeWhile'
 
     -- * Re-exports
     -- $reexports
     , module Data.ByteString
+    , module Data.Profunctor
     , module Data.Word
     , module Pipes.Parse
     ) where
 
 import Control.Exception (throwIO, try)
-import Control.Monad (liftM)
-import Control.Monad.Trans.State.Strict (StateT)
+import Control.Monad (liftM, join)
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.ByteString.Internal (isSpaceWord8)
@@ -151,26 +148,26 @@ import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Char (ord)
+import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
+import Data.Profunctor (Profunctor)
+import qualified Data.Profunctor
 import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
 import Pipes
-import qualified Pipes.ByteString.Parse as PBP
 import Pipes.ByteString.Parse (
     nextByte, drawByte, unDrawByte, peekByte, isEndOfBytes )
 import Pipes.Core (respond, Server')
-import Pipes.Lift (evalStateP)
 import qualified Pipes.Parse as PP
-import Pipes.Parse (input, concat, FreeT, isEndOfInput)
+import Pipes.Parse (concats, FreeT, isEndOfInput)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
       all
     , any
     , break
-    , concat
     , concatMap
     , drop
     , dropWhile
@@ -189,8 +186,6 @@ import Prelude hiding (
     , splitAt
     , take
     , takeWhile
-    , unlines
-    , unwords
     , words
     )
 
@@ -244,18 +239,8 @@ hGet size h = go
                 go
 {-# INLINABLE hGet #-}
 
--- | Convert a 'Word8' producer into a byte stream using a default chunk size
-pack :: Monad m => Producer Word8 m () -> Producer ByteString m ()
-pack p = evalStateP p go where
-    go = do
-        eof <- lift isEndOfInput
-        if eof
-            then return ()
-            else do
-                bytes <- lift $ P.toListM (P.take defaultChunkSize <-< input)
-                yield $ BS.pack bytes
-                go
-{-# INLINABLE pack #-}
+(^.) :: a -> ((b -> Constant b b) -> (a -> Constant b a)) -> b
+a ^. lens = getConstant (lens Constant a)
 
 {-| Like 'hGetSome', except you can vary the maximum chunk size for each request
 -}
@@ -288,8 +273,7 @@ hGetN h = go
 
     Unlike 'toHandle', 'stdout' gracefully terminates on a broken output pipe.
 
-    Note: For best performance, use @(for source (liftIO . putStr))@ instead of
-    @(source >-> stdout)@.
+> p >-> stdout = for p (liftIO . putStr)
 -}
 stdout :: MonadIO m => Consumer' ByteString m ()
 stdout = go
@@ -308,8 +292,7 @@ stdout = go
 
 {-| Convert a byte stream into a 'Handle'
 
-    Note: For best performance, use @(for source (liftIO . hPutStr handle))@
-    instead of @(source >-> toHandle handle)@.
+> p >-> toHandle handle = for p (liftIO . hPutStr handle)
 -}
 toHandle :: MonadIO m => IO.Handle -> Consumer' ByteString m r
 toHandle h = for cat (liftIO . BS.hPut h)
@@ -419,16 +402,6 @@ scan step begin = go begin
         yield bs'
         go w8'
 {-# INLINABLE scan #-}
-
--- | Unpack the bytes
-unpack :: Monad m => Pipe ByteString Word8 m ()
-unpack = for cat (mapM_ yield . BS.unpack)
-{-# INLINABLE unpack #-}
-
-{-# RULES
-    "p >-> unpack" forall p .
-        p >-> unpack = for p (\bs -> mapM_ yield (BS.unpack bs))
-  #-}
 
 {-| Fold a pure 'Producer' of strict 'ByteString's into a lazy
     'BL.ByteString'
@@ -568,14 +541,30 @@ count :: (Monad m, Num n) => Word8 -> Producer ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
 
--- | Splits a 'Producer' after the given number of bytes
+{-| Improper lens from a 'Producer' to two 'Producer's split after the given
+    number of bytes
+
+> splitAt
+>     :: (Monad m, ,Integral n)
+>     => n
+>     -> Lens' (Producer ByteString m r)
+>              (Producer ByteString m (Producer ByteString m r))
+-}
 splitAt
-    :: (Monad m, Integral n)
+    :: (Functor f, Monad m, Integral n)
     => n
-    -> Producer ByteString m r
-    -> Producer' ByteString m (Producer ByteString m r)
-splitAt = go
+    -- ^
+    -> (Producer ByteString m (Producer ByteString m x)
+        -> f (Producer ByteString m (Producer ByteString m x)) )
+    -- ^
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
+    -- ^
+splitAt n0 k p0 = fmap join (k (go n0 p0))
   where
+    -- go  :: (Monad m, Integral n)
+    --     => n
+    --     -> Producer ByteString m r
+    --     -> Producer' ByteString m (Producer ByteString m r)
     go 0 p = return p
     go n p = do
         x <- lift (next p)
@@ -593,30 +582,26 @@ splitAt = go
                         return (yield suffix >> p')
 {-# INLINABLE splitAt #-}
 
--- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
-chunksOf
-    :: (Monad m, Integral n)
-    => n -> Producer ByteString m r -> FreeT (Producer ByteString m) m r
-chunksOf n = go
-  where
-    go p = PP.FreeT $ do
-        x <- next p
-        return $ case x of
-            Left   r       -> PP.Pure r
-            Right (bs, p') -> PP.Free $ do
-                p'' <- splitAt n (yield bs >> p')
-                return (go p'')
-{-# INLINABLE chunksOf #-}
+{-| 'span' is an improper lens from a 'Producer' to two 'Producer's, where the
+    outer 'Producer' is the longest consecutive group of bytes that satisfy the
+    given predicate
 
-{-| Split a byte stream in two, where the first byte stream is the longest
-    consecutive group of bytes that satisfy the predicate
+> span
+>     :: (Monad m)
+>     => (Word8 -> Bool)
+>     -> Lens' (Producer ByteString m r)
+>              (Producer ByteString m (Producer ByteString m r))
 -}
 span
-    :: (Monad m)
+    :: (Functor f, Monad m)
     => (Word8 -> Bool)
-    -> Producer  ByteString m  r
-    -> Producer' ByteString m (Producer ByteString m r)
-span predicate = go
+    -- ^
+    -> (Producer ByteString m (Producer ByteString m r)
+        -> f (Producer ByteString m (Producer ByteString m r)))
+    -- ^
+    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -- ^
+span predicate k p0 = fmap join (k (go p0))
   where
     go p = do
         x <- lift (next p)
@@ -633,25 +618,35 @@ span predicate = go
                         return (yield suffix >> p')
 {-# INLINABLE span #-}
 
-{-| Split a byte stream in two, where the first byte stream is the longest
-    consecutive group of bytes that don't satisfy the predicate
+{-| 'break' is an improper lens from a 'Producer' to two 'Producer's, where
+     the outer 'Producer' is the longest consecutive group of bytes that fail
+     the given predicate
+
+> break
+>     :: (Monad m)
+>     => (Word8 -> Bool)
+>     -> Lens' (Producer ByteString m r)
+>              (Producer ByteString m (Producer ByteString m r))
 -}
 break
-    :: (Monad m)
+    :: (Functor f, Monad m)
     => (Word8 -> Bool)
-    -> Producer ByteString m  r
-    -> Producer ByteString m (Producer ByteString m r)
+    -- ^
+    -> (Producer ByteString m (Producer ByteString m r)
+        -> f (Producer ByteString m (Producer ByteString m r)))
+    -- ^
+    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -- ^
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
-{-| Split a byte stream into sub-streams delimited by bytes that satisfy the
+{-| Split a byte stream into groups separated by bytes that satisfy the
     predicate
 -}
 splitWith
     :: (Monad m)
     => (Word8 -> Bool)
-    -> Producer ByteString m r
-    -> PP.FreeT (Producer ByteString m) m r
+    -> Producer ByteString m x -> FreeT (Producer ByteString m) m x
 splitWith predicate p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
@@ -663,7 +658,7 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
                 then go0 p'
                 else go1 (yield bs >> p')
     go1 p = return $ PP.Free $ do
-        p' <- span (not . predicate) p
+        p' <- p^.span (not . predicate)
         return $ PP.FreeT $ do
             x <- nextByte p'
             case x of
@@ -671,86 +666,184 @@ splitWith predicate p0 = PP.FreeT (go0 p0)
                 Right (_, p'') -> go1 p''
 {-# INLINABLE splitWith #-}
 
--- | Split a byte stream using the given 'Word8' as the delimiter
-split :: (Monad m)
-      => Word8
-      -> Producer ByteString m r
-      -> FreeT (Producer ByteString m) m r
+-- | Split a byte stream into groups separated by the given byte
+split
+    :: (Monad m)
+    => Word8 -> Producer ByteString m x -> FreeT (Producer ByteString m) m x
 split w8 = splitWith (w8 ==)
 {-# INLINABLE split #-}
 
-{-| Group a byte stream into 'FreeT'-delimited byte streams using the supplied
-    equality predicate
+{-| Split a byte stream into 'FreeT'-delimited byte streams of fixed size
+
+> chunksOf
+>     :: (Monad m, Integral n)
+>     => n
+>     -> Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
 -}
-groupBy
-    :: (Monad m)
-    => (Word8 -> Word8 -> Bool)
-    -> Producer ByteString m r
-    -> FreeT (Producer ByteString m) m r
-groupBy equal p0 = PP.FreeT (go p0)
-  where
-    go p = do
-        x <- next p
-        case x of
-            Left   r       -> return (PP.Pure r)
-            Right (bs, p') -> case (BS.uncons bs) of
-                Nothing      -> go p'
-                Just (w8, _) -> do
-                    return $ PP.Free $ do
-                        p'' <- span (equal w8) (yield bs >> p')
-                        return $ PP.FreeT (go p'')
-{-# INLINABLE groupBy #-}
-
--- | Group a byte stream into 'FreeT'-delimited byte streams of identical bytes
-group
-    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
-group = groupBy (==)
-{-# INLINABLE group #-}
-
-{-| Split a byte stream into 'FreeT'-delimited lines
-
-    Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
--}
-lines
-    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
-lines p0 = PP.FreeT (go0 p0)
-  where
-    go0 p = do
-        x <- next p
-        case x of
-            Left   r       -> return (PP.Pure r)
-            Right (bs, p') ->
-                if (BS.null bs)
-                then go0 p'
-                else return $ PP.Free $ go1 (yield bs >> p')
-    go1 p = do
-        p' <- break (fromIntegral (ord '\n') ==) p
-        return $ PP.FreeT $ do
-            x  <- nextByte p'
-            case x of
-                Left   r       -> return (PP.Pure r)
-                Right (_, p'') -> go0 p''
-{-# INLINABLE lines #-}
-
-{-| Split a byte stream into 'FreeT'-delimited words
-
-    Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
--}
-words
-    :: (Monad m) => Producer ByteString m r -> FreeT (Producer ByteString m) m r
-words = go
+chunksOf
+    :: (Functor f, Monad m, Integral n)
+    => n
+    -- ^
+    -> (FreeT (Producer ByteString m) m r
+        -> f (FreeT (Producer ByteString m) m r))
+    -- ^
+    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -- ^
+chunksOf n k p0 = fmap concats (k (go p0))
   where
     go p = PP.FreeT $ do
-        x <- next (p >-> dropWhile isSpaceWord8)
+        x <- next p
         return $ case x of
             Left   r       -> PP.Pure r
             Right (bs, p') -> PP.Free $ do
-                p'' <- break isSpaceWord8 (yield bs >> p')
+                p'' <- (yield bs >> p')^.splitAt n
                 return (go p'')
+{-# INLINABLE chunksOf #-}
+
+{-| Isomorphism between a byte stream and groups of identical bytes using the
+    supplied equality predicate
+
+> groupBy
+>     :: (Monad m)
+>     => (Word8 -> Word8 -> Bool)
+>     -> Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+-}
+groupBy
+    :: (Functor f, Monad m)
+    => (Word8 -> Word8 -> Bool)
+    -> (FreeT (Producer ByteString m) m r
+        -> f (FreeT (Producer ByteString m) m r))
+    -- ^
+    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -- ^
+groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
+  where
+    -- _groupBy
+    --     :: (Monad m)
+    --     => (Word8 -> Word8 -> Bool)
+    --     -> Producer ByteString m r
+    --     -> FreeT (Producer ByteString m) m r
+    _groupBy equal p0' = PP.FreeT (go p0')
+      where
+        go p = do
+            x <- next p
+            case x of
+                Left   r       -> return (PP.Pure r)
+                Right (bs, p') -> case (BS.uncons bs) of
+                    Nothing      -> go p'
+                    Just (w8, _) -> do
+                        return $ PP.Free $ do
+                            p'' <- (yield bs >> p')^.span (equal w8)
+                            return $ PP.FreeT (go p'')
+{-# INLINABLE groupBy #-}
+
+{-| Like 'groupBy', where the equality predicate is ('==')
+
+> group
+>     :: (Monad m)
+>     => Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+-}
+group
+    :: (Functor f, Monad m)
+    => (FreeT (Producer ByteString m) m r
+        -> f (FreeT (Producer ByteString m) m r))
+    -- ^
+    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -- ^
+group = groupBy (==)
+{-# INLINABLE group #-}
+
+{-| Improper isomorphism between a bytestream and its lines
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
+
+> lines
+>     :: (Monad m)
+>     => Iso' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+-}
+lines
+    :: (Functor f, Monad m, Profunctor p)
+    => p (FreeT (Producer ByteString m) m r)
+         (f (FreeT (Producer ByteString m) m r) )
+    -- ^
+    -> p (Producer ByteString m r) (f (Producer ByteString m r))
+    -- ^
+lines = Data.Profunctor.dimap _lines (fmap _unlines)
+  where
+    -- _lines
+    --     :: (Monad m)
+    --     => Producer ByteString m r -> FreeT (Producer ByteString m) m r
+    _lines p0 = PP.FreeT (go0 p0)
+      where
+        go0 p = do
+            x <- next p
+            case x of
+                Left   r       -> return (PP.Pure r)
+                Right (bs, p') ->
+                    if (BS.null bs)
+                    then go0 p'
+                    else return $ PP.Free $ go1 (yield bs >> p')
+        go1 p = do
+            p' <- p^.break (fromIntegral (ord '\n') ==)
+            return $ PP.FreeT $ do
+                x  <- nextByte p'
+                case x of
+                    Left   r       -> return (PP.Pure r)
+                    Right (_, p'') -> go0 p''
+
+    -- _unlines
+    --     :: (Monad m)
+    --      => FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    _unlines = go
+      where
+        go f = do
+            x <- lift (PP.runFreeT f)
+            case x of
+                PP.Pure r -> return r
+                PP.Free p -> do
+                    f' <- p
+                    yield $ BS.singleton $ fromIntegral (ord '\n')
+                    go f'
+{-# INLINABLE lines #-}
+
+{-| Improper isomorphism between a bytestream and its words
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
+
+> words
+>     :: (Monad m)
+>     => Iso' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+-}
+words
+    :: (Functor f, Monad m, Profunctor p)
+    => p    (FreeT (Producer ByteString m) m r)
+         (f (FreeT (Producer ByteString m) m r))
+    -- ^
+    -> p (Producer ByteString m r) (f (Producer ByteString m r))
+    -- ^
+words = Data.Profunctor.dimap _words (fmap _unwords)
+  where
+    -- _words
+    --     :: (Monad m)
+    --     => Producer ByteString m r -> FreeT (Producer ByteString m) m r
+    _words = go
+      where
+        go p = PP.FreeT $ do
+            x <- next (p >-> dropWhile isSpaceWord8)
+            return $ case x of
+                Left   r       -> PP.Pure r
+                Right (bs, p') -> PP.Free $ do
+                    p'' <- (yield bs >> p')^.break isSpaceWord8
+                    return (go p'')
+
+    -- _unwords
+    --     :: (Monad m)
+    --     => FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    _unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
@@ -774,6 +867,30 @@ intersperse w8 = go0
                 yield (BS.intersperse w8 bs)
                 go1 p'
 {-# INLINABLE intersperse #-}
+
+{-| An improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
+    using a default chunk size when packing
+
+> pack :: (Monad m) => Iso' (Producer Word8 m x) (Producer ByteString m x)
+-}
+pack
+    :: (Functor f, Monad m, Profunctor p)
+    => p (Producer ByteString m x) (f (Producer ByteString m x))
+    -- ^
+    -> p (Producer Word8      m x) (f (Producer Word8      m x))
+    -- ^
+pack = Data.Profunctor.dimap to (fmap from)
+  where
+    -- to :: (Monad m) => Producer Word8 m x -> Producer ByteString m x
+    to p = PP.folds step id done (p^.PP.chunksOf defaultChunkSize)
+
+    step diffAs w8 = diffAs . (w8:)
+
+    done diffAs = BS.pack (diffAs [])
+
+    -- from :: (Monad m) => Producer ByteString m x -> Producer Word8 m x
+    from p = for p (each . BS.unpack)
+{-# INLINABLE pack #-}
 
 {-| 'intercalate' concatenates the 'FreeT'-delimited byte streams after
     interspersing a byte stream in between them
@@ -802,53 +919,10 @@ intercalate p0 = go0
                 go1 f'
 {-# INLINABLE intercalate #-}
 
-{-| Join 'FreeT'-delimited lines into a byte stream
-
-    Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
--}
-unlines
-    :: (Monad m) => FreeT (Producer ByteString m) m r -> Producer ByteString m r
-unlines = go
-  where
-    go f = do
-        x <- lift (PP.runFreeT f)
-        case x of
-            PP.Pure r -> return r
-            PP.Free p -> do
-                f' <- p
-                yield $ BS.singleton $ fromIntegral (ord '\n')
-                go f'
-{-# INLINABLE unlines #-}
-
-{-| Join 'FreeT'-delimited words into a byte stream
-
-    Note: This function is purely for demonstration purposes since it assumes a
-    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
--}
-unwords
-    :: (Monad m) => FreeT (Producer ByteString m) m r -> Producer ByteString m r
-unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
-{-# INLINABLE unwords #-}
-
 {- $parse
     The following parsing utilities are single-byte analogs of the ones found
     in @pipes-parse@.
 -}
-
-{-| Take bytes until they fail the predicate
-
-    Unlike 'takeWhile', this 'PP.unDraw's unused bytes
--}
-takeWhile'
-    :: (Monad m)
-    => (Word8 -> Bool)
-    -> Pipe ByteString ByteString (StateT (Producer ByteString m r) m) ()
-takeWhile' = PBP.takeWhile
-{-# INLINABLE takeWhile' #-}
-{-# DEPRECATED takeWhile' "Use Pipes.ByteString.Parse.takeWhile instead" #-}
 
 {- $reexports
     "Pipes.ByteString.Parse" re-exports 'nextByte', 'drawByte', 'unDrawByte',
@@ -856,7 +930,9 @@ takeWhile' = PBP.takeWhile
     
     @Data.ByteString@ re-exports the 'ByteString' type.
 
+    @Data.Profunctor@ re-exports the 'Profunctor' type.
+
     @Data.Word@ re-exports the 'Word8' type.
 
-    @Pipes.Parse@ re-exports 'input', 'concat', and 'FreeT' (the type).
+    @Pipes.Parse@ re-exports 'concats', and 'FreeT' (the type).
 -}
