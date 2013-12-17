@@ -591,17 +591,17 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
 > span
 >     :: (Monad m)
 >     => (Word8 -> Bool)
->     -> Lens' (Producer ByteString m r)
->              (Producer ByteString m (Producer ByteString m r))
+>     -> Lens' (Producer ByteString m x)
+>              (Producer ByteString m (Producer ByteString m x))
 -}
 span
     :: (Functor f, Monad m)
     => (Word8 -> Bool)
     -- ^
-    -> (Producer ByteString m (Producer ByteString m r)
-        -> f (Producer ByteString m (Producer ByteString m r)))
+    -> (Producer ByteString m (Producer ByteString m x)
+        -> f (Producer ByteString m (Producer ByteString m x)))
     -- ^
-    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
     -- ^
 span predicate k p0 = fmap join (k (go p0))
   where
@@ -627,17 +627,17 @@ span predicate k p0 = fmap join (k (go p0))
 > break
 >     :: (Monad m)
 >     => (Word8 -> Bool)
->     -> Lens' (Producer ByteString m r)
->              (Producer ByteString m (Producer ByteString m r))
+>     -> Lens' (Producer ByteString m x)
+>              (Producer ByteString m (Producer ByteString m x))
 -}
 break
     :: (Functor f, Monad m)
     => (Word8 -> Bool)
     -- ^
-    -> (Producer ByteString m (Producer ByteString m r)
-        -> f (Producer ByteString m (Producer ByteString m r)))
+    -> (Producer ByteString m (Producer ByteString m x)
+        -> f (Producer ByteString m (Producer ByteString m x)))
     -- ^
-    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
     -- ^
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
@@ -680,16 +680,16 @@ split w8 = splitWith (w8 ==)
 > chunksOf
 >     :: (Monad m, Integral n)
 >     => n
->     -> Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+>     -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 chunksOf
     :: (Functor f, Monad m, Integral n)
     => n
     -- ^
-    -> (FreeT (Producer ByteString m) m r
-        -> f (FreeT (Producer ByteString m) m r))
+    -> (FreeT (Producer ByteString m) m x
+        -> f (FreeT (Producer ByteString m) m x))
     -- ^
-    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
     -- ^
 chunksOf n k p0 = fmap concats (k (go p0))
   where
@@ -708,15 +708,15 @@ chunksOf n k p0 = fmap concats (k (go p0))
 > groupBy
 >     :: (Monad m)
 >     => (Word8 -> Word8 -> Bool)
->     -> Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+>     -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 groupBy
     :: (Functor f, Monad m)
     => (Word8 -> Word8 -> Bool)
-    -> (FreeT (Producer ByteString m) m r
-        -> f (FreeT (Producer ByteString m) m r))
+    -> (FreeT (Producer ByteString m) m x
+        -> f (FreeT (Producer ByteString m) m x))
     -- ^
-    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
     -- ^
 groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
   where
@@ -743,14 +743,14 @@ groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
 
 > group
 >     :: (Monad m)
->     => Lens' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+>     => Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 group
     :: (Functor f, Monad m)
-    => (FreeT (Producer ByteString m) m r
-        -> f (FreeT (Producer ByteString m) m r))
+    => (FreeT (Producer ByteString m) m x
+        -> f (FreeT (Producer ByteString m) m x))
     -- ^
-    -> (Producer ByteString m r -> f (Producer ByteString m r))
+    -> (Producer ByteString m x -> f (Producer ByteString m x))
     -- ^
 group = groupBy (==)
 {-# INLINABLE group #-}
@@ -763,20 +763,20 @@ group = groupBy (==)
 
 > lines
 >     :: (Monad m)
->     => Iso' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+>     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 lines
     :: (Functor f, Monad m, Profunctor p)
-    => p (FreeT (Producer ByteString m) m r)
-         (f (FreeT (Producer ByteString m) m r) )
+    => p (FreeT (Producer ByteString m) m x)
+         (f (FreeT (Producer ByteString m) m x) )
     -- ^
-    -> p (Producer ByteString m r) (f (Producer ByteString m r))
+    -> p (Producer ByteString m x) (f (Producer ByteString m x))
     -- ^
 lines = Data.Profunctor.dimap _lines (fmap _unlines)
   where
     -- _lines
     --     :: (Monad m)
-    --     => Producer ByteString m r -> FreeT (Producer ByteString m) m r
+    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
     _lines p0 = PP.FreeT (go0 p0)
       where
         go0 p = do
@@ -797,7 +797,7 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
 
     -- _unlines
     --     :: (Monad m)
-    --      => FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    --      => FreeT (Producer ByteString m) m x -> Producer ByteString m x
     _unlines = go
       where
         go f = do
@@ -818,20 +818,20 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
 
 > words
 >     :: (Monad m)
->     => Iso' (Producer ByteString m r) (FreeT (Producer ByteString m) m r)
+>     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 words
     :: (Functor f, Monad m, Profunctor p)
-    => p    (FreeT (Producer ByteString m) m r)
-         (f (FreeT (Producer ByteString m) m r))
+    => p    (FreeT (Producer ByteString m) m x)
+         (f (FreeT (Producer ByteString m) m x))
     -- ^
-    -> p (Producer ByteString m r) (f (Producer ByteString m r))
+    -> p (Producer ByteString m x) (f (Producer ByteString m x))
     -- ^
 words = Data.Profunctor.dimap _words (fmap _unwords)
   where
     -- _words
     --     :: (Monad m)
-    --     => Producer ByteString m r -> FreeT (Producer ByteString m) m r
+    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
     _words = go
       where
         go p = PP.FreeT $ do
@@ -844,7 +844,7 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
 
     -- _unwords
     --     :: (Monad m)
-    --     => FreeT (Producer ByteString m) m r -> Producer ByteString m r
+    --     => FreeT (Producer ByteString m) m x -> Producer ByteString m x
     _unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
 
@@ -900,8 +900,8 @@ pack = Data.Profunctor.dimap to (fmap from)
 intercalate
     :: (Monad m)
     => Producer ByteString m ()
-    -> FreeT (Producer ByteString m) m r
-    -> Producer ByteString m r
+    -> FreeT (Producer ByteString m) m x
+    -> Producer ByteString m x
 intercalate p0 = go0
   where
     go0 f = do
