@@ -564,21 +564,24 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
     --     => n
     --     -> Producer ByteString m r
     --     -> Producer' ByteString m (Producer ByteString m r)
-    go 0 p = return p
-    go n p = do
-        x <- lift (next p)
-        case x of
-            Left   r       -> return (return r)
-            Right (bs, p') -> do
-                let len = fromIntegral (BS.length bs)
-                if (len <= n)
-                    then do
-                        yield bs
-                        go (n - len) p'
-                    else do
-                        let (prefix, suffix) = BS.splitAt (fromIntegral n) bs
-                        yield prefix
-                        return (yield suffix >> p')
+    go n p =
+        if (n <= 0)
+        then return p
+	else do
+            x <- lift (next p)
+            case x of
+                Left   r       -> return (return r)
+                Right (bs, p') -> do
+                    let len = fromIntegral (BS.length bs)
+                    if (len <= n)
+                        then do
+                            yield bs
+                            go (n - len) p'
+                        else do
+                            let (prefix, suffix) =
+                                    BS.splitAt (fromIntegral n) bs
+                            yield prefix
+                            return (yield suffix >> p')
 {-# INLINABLE splitAt #-}
 
 {-| 'span' is an improper lens from a 'Producer' to two 'Producer's, where the
