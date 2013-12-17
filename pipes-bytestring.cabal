@@ -24,7 +24,5 @@ Library
         pipes-parse  >= 3.0.0   && < 3.1 ,
         profunctors  >= 3.1.1   && < 4.1 ,
         transformers >= 0.2.0.0 && < 0.4
-    Exposed-Modules:
-        Pipes.ByteString,
-        Pipes.ByteString.Parse
+    Exposed-Modules: Pipes.ByteString
     GHC-Options: -O2 -Wall

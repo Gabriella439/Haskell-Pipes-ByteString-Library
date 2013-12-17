@@ -123,7 +123,7 @@ module Pipes.ByteString (
     -- * Joiners
     , intercalate
 
-    -- * Low-level Parsers
+    -- * Parsers
     -- $parse
     , nextByte
     , drawByte
@@ -141,6 +141,7 @@ module Pipes.ByteString (
 
 import Control.Exception (throwIO, try)
 import Control.Monad (liftM, join)
+import Control.Monad.Trans.State.Strict (modify)
 import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.ByteString.Internal (isSpaceWord8)
@@ -157,11 +158,9 @@ import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
 import Pipes
-import Pipes.ByteString.Parse (
-    nextByte, drawByte, unDrawByte, peekByte, isEndOfBytes )
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
-import Pipes.Parse (concats, FreeT, isEndOfInput)
+import Pipes.Parse (Parser, concats, FreeT)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
@@ -924,15 +923,87 @@ intercalate p0 = go0
     in @pipes-parse@.
 -}
 
+{-| Consume the first byte from a byte stream
+
+    'next' either fails with a 'Left' if the 'Producer' has no more bytes or
+    succeeds with a 'Right' providing the next byte and the remainder of the
+    'Producer'.
+-}
+nextByte
+    :: (Monad m)
+    => Producer ByteString m r
+    -> m (Either r (Word8, Producer ByteString m r))
+nextByte = go
+  where
+    go p = do
+        x <- next p
+        case x of
+            Left   r       -> return (Left r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing        -> go p'
+                Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
+{-# INLINABLE nextByte #-}
+
+{-| Draw one 'Word8' from the underlying 'Producer', returning 'Left' if the
+    'Producer' is empty
+-}
+drawByte :: (Monad m) => Parser ByteString m (Maybe Word8)
+drawByte = do
+    x <- PP.draw
+    case x of
+        Nothing -> return Nothing
+        Just bs -> case (BS.uncons bs) of
+            Nothing        -> drawByte
+            Just (w8, bs') -> do
+                PP.unDraw bs'
+                return (Just w8)
+{-# INLINABLE drawByte #-}
+
+-- | Push back a 'Word8' onto the underlying 'Producer'
+unDrawByte :: (Monad m) => Word8 -> Parser ByteString m ()
+unDrawByte w8 = modify (yield (BS.singleton w8) >>)
+{-# INLINABLE unDrawByte #-}
+
+{-| 'peekByte' checks the first 'Word8' in the stream, but uses 'unDrawByte' to
+    push the 'Word8' back
+
+> peekByte = do
+>     x <- drawByte
+>     case x of
+>         Nothing -> return ()
+>         Just w8 -> unDrawByte w8
+>     return x
+-}
+peekByte :: (Monad m) => Parser ByteString m (Maybe Word8)
+peekByte = do
+    x <- drawByte
+    case x of
+        Nothing -> return ()
+        Just w8 -> unDrawByte w8
+    return x
+{-# INLINABLE peekByte #-}
+
+{-| Check if the underlying 'Producer' has no more bytes
+
+    Note that this will skip over empty 'ByteString' chunks, unlike
+    'Pipes.Parse.isEndOfInput' from @pipes-parse@.
+
+> isEndOfBytes = liftM isNothing peekByte
+-}
+isEndOfBytes :: (Monad m) => Parser ByteString m Bool
+isEndOfBytes = do
+    x <- peekByte
+    return (case x of
+        Nothing -> True
+        Just _  -> False )
+{-# INLINABLE isEndOfBytes #-}
+
 {- $reexports
-    "Pipes.ByteString.Parse" re-exports 'nextByte', 'drawByte', 'unDrawByte',
-    'peekByte', and 'isEndOfBytes'.
-    
     @Data.ByteString@ re-exports the 'ByteString' type.
 
     @Data.Profunctor@ re-exports the 'Profunctor' type.
 
     @Data.Word@ re-exports the 'Word8' type.
 
-    @Pipes.Parse@ re-exports 'concats', and 'FreeT' (the type).
+    @Pipes.Parse@ re-exports 'Parser', 'concats', and 'FreeT' (the type).
 -}
