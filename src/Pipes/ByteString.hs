@@ -85,7 +85,7 @@ module Pipes.ByteString (
     -- * Folds
     , toLazy
     , toLazyM
-    , fold
+    , foldBytes
     , head
     , last
     , null
@@ -421,11 +421,11 @@ toLazyM = liftM BL.fromChunks . P.toListM
 {-# INLINABLE toLazyM #-}
 
 -- | Reduce the stream of bytes using a strict left fold
-fold
+foldBytes
     :: Monad m
     => (x -> Word8 -> x) -> x -> (x -> r) -> Producer ByteString m () -> m r
-fold step begin done = P.fold (\x bs -> BS.foldl' step x bs) begin done
-{-# INLINABLE fold #-}
+foldBytes step begin done = P.fold (\x bs -> BS.foldl' step x bs) begin done
+{-# INLINABLE foldBytes #-}
 
 -- | Retrieve the first 'Word8'
 head :: (Monad m) => Producer ByteString m () -> m (Maybe Word8)
