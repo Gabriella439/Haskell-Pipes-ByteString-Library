@@ -157,6 +157,7 @@ import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
+import Lens.Family2 (Lens')
 import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
@@ -542,22 +543,12 @@ count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 
 {-| Improper lens from a 'Producer' to two 'Producer's split after the given
     number of bytes
-
-> splitAt
->     :: (Monad m, ,Integral n)
->     => n
->     -> Lens' (Producer ByteString m e)
->              (Producer ByteString m (Producer ByteString m e))
 -}
 splitAt
-    :: (Functor f, Monad m, Integral n)
+    :: (Monad m, Integral n)
     => n
-    -- ^
-    -> (Producer ByteString m (Producer ByteString m e)
-        -> f (Producer ByteString m (Producer ByteString m e)) )
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    -> Lens' (Producer ByteString m e)
+             (Producer ByteString m (Producer ByteString m e))
 splitAt n0 k p0 = fmap join (k (go n0 p0))
   where
     -- go  :: (Monad m, Integral n)
@@ -587,22 +578,12 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
 {-| 'span' is an improper lens from a 'Producer' to two 'Producer's, where the
     outer 'Producer' is the longest consecutive group of bytes that satisfy the
     given predicate
-
-> span
->     :: (Monad m)
->     => (Word8 -> Bool)
->     -> Lens' (Producer ByteString m e)
->              (Producer ByteString m (Producer ByteString m e))
 -}
 span
-    :: (Functor f, Monad m)
+    :: (Monad m)
     => (Word8 -> Bool)
-    -- ^
-    -> (Producer ByteString m (Producer ByteString m e)
-        -> f (Producer ByteString m (Producer ByteString m e)))
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    -> Lens' (Producer ByteString m e)
+             (Producer ByteString m (Producer ByteString m e))
 span predicate k p0 = fmap join (k (go p0))
   where
     go p = do
@@ -623,22 +604,12 @@ span predicate k p0 = fmap join (k (go p0))
 {-| 'break' is an improper lens from a 'Producer' to two 'Producer's, where
      the outer 'Producer' is the longest consecutive group of bytes that fail
      the given predicate
-
-> break
->     :: (Monad m)
->     => (Word8 -> Bool)
->     -> Lens' (Producer ByteString m e)
->              (Producer ByteString m (Producer ByteString m e))
 -}
 break
-    :: (Functor f, Monad m)
+    :: (Monad m)
     => (Word8 -> Bool)
-    -- ^
-    -> (Producer ByteString m (Producer ByteString m e)
-        -> f (Producer ByteString m (Producer ByteString m e)))
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    -> Lens' (Producer ByteString m e)
+             (Producer ByteString m (Producer ByteString m e))
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
@@ -675,22 +646,11 @@ split
 split w8 = splitWith (w8 ==)
 {-# INLINABLE split #-}
 
-{-| Split a byte stream into 'FreeT'-delimited byte streams of fixed size
-
-> chunksOf
->     :: (Monad m, Integral n)
->     => n
->     -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
--}
+-- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
 chunksOf
-    :: (Functor f, Monad m, Integral n)
+    :: (Monad m, Integral n)
     => n
-    -- ^
-    -> (FreeT (Producer ByteString m) m e
-        -> f (FreeT (Producer ByteString m) m e))
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
 chunksOf n k p0 = fmap concats (k (go p0))
   where
     go p = PP.FreeT $ do
@@ -704,20 +664,11 @@ chunksOf n k p0 = fmap concats (k (go p0))
 
 {-| Isomorphism between a byte stream and groups of identical bytes using the
     supplied equality predicate
-
-> groupBy
->     :: (Monad m)
->     => (Word8 -> Word8 -> Bool)
->     -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
 -}
 groupBy
-    :: (Functor f, Monad m)
+    :: (Monad m)
     => (Word8 -> Word8 -> Bool)
-    -> (FreeT (Producer ByteString m) m e
-        -> f (FreeT (Producer ByteString m) m e))
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
 groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
   where
     -- _groupBy
@@ -739,19 +690,10 @@ groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
                             return $ PP.FreeT (go p'')
 {-# INLINABLE groupBy #-}
 
-{-| Like 'groupBy', where the equality predicate is ('==')
-
-> group
->     :: (Monad m)
->     => Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
--}
+-- | Like 'groupBy', where the equality predicate is ('==')
 group
-    :: (Functor f, Monad m)
-    => (FreeT (Producer ByteString m) m e
-        -> f (FreeT (Producer ByteString m) m e))
-    -- ^
-    -> (Producer ByteString m e -> f (Producer ByteString m e))
-    -- ^
+    :: (Monad m)
+    => Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
 group = groupBy (==)
 {-# INLINABLE group #-}
 
