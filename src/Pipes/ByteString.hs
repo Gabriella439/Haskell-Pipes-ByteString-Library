@@ -421,7 +421,11 @@ toLazyM :: (Monad m) => Producer ByteString m () -> m BL.ByteString
 toLazyM = liftM BL.fromChunks . P.toListM
 {-# INLINABLE toLazyM #-}
 
--- | Reduce the stream of bytes using a strict left fold
+{-| Reduce the stream of bytes using a strict left fold
+
+    Note: It's more efficient to use folds from @Control.Foldl.ByteString@ in
+    conjunction with @Pipes.Prelude.'Pipes.Prelude.fold'@ when possible
+-}
 foldBytes
     :: Monad m
     => (x -> Word8 -> x) -> x -> (x -> r) -> Producer ByteString m () -> m r
