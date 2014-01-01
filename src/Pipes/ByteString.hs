@@ -893,23 +893,23 @@ nextByte = go
                 Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
 {-# INLINABLE nextByte #-}
 
-{-| Draw one 'Word8' from the underlying 'Producer', returning 'Left' if the
+{-| Draw one 'Word8' from the underlying 'Producer', returning 'Nothing' if the
     'Producer' is empty
 -}
-drawByte :: (Monad m) => Parser e ByteString m (Either e Word8)
+drawByte :: (Monad m) => Parser ByteString m (Maybe Word8)
 drawByte = do
     x <- PP.draw
     case x of
-        Left  e  -> return (Left e)
-        Right bs -> case (BS.uncons bs) of
+        Nothing -> return Nothing
+        Just bs -> case (BS.uncons bs) of
             Nothing        -> drawByte
             Just (w8, bs') -> do
                 PP.unDraw bs'
-                return (Right w8)
+                return (Just w8)
 {-# INLINABLE drawByte #-}
 
 -- | Push back a 'Word8' onto the underlying 'Producer'
-unDrawByte :: (Monad m) => Word8 -> Parser e ByteString m ()
+unDrawByte :: (Monad m) => Word8 -> Parser ByteString m ()
 unDrawByte w8 = modify (yield (BS.singleton w8) >>)
 {-# INLINABLE unDrawByte #-}
 
@@ -923,12 +923,12 @@ unDrawByte w8 = modify (yield (BS.singleton w8) >>)
 >         Just w8 -> unDrawByte w8
 >     return x
 -}
-peekByte :: (Monad m) => Parser e ByteString m (Either e Word8)
+peekByte :: (Monad m) => Parser ByteString m (Maybe Word8)
 peekByte = do
     x <- drawByte
     case x of
-        Left  _  -> return ()
-        Right w8 -> unDrawByte w8
+        Nothing -> return ()
+        Just w8 -> unDrawByte w8
     return x
 {-# INLINABLE peekByte #-}
 
@@ -937,14 +937,14 @@ peekByte = do
     Note that this will skip over empty 'ByteString' chunks, unlike
     'Pipes.Parse.isEndOfInput' from @pipes-parse@.
 
-> isEndOfBytes = liftM isRight peekByte
+> isEndOfBytes = liftM isNothing peekByte
 -}
-isEndOfBytes :: (Monad m) => Parser e ByteString m Bool
+isEndOfBytes :: (Monad m) => Parser ByteString m Bool
 isEndOfBytes = do
     x <- peekByte
     return (case x of
-        Left  _ -> True
-        Right _ -> False )
+        Nothing -> True
+        Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
 {- $reexports
