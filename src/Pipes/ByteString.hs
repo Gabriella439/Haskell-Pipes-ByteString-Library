@@ -102,34 +102,31 @@ module Pipes.ByteString (
     , findIndex
     , count
 
-    -- * Parsing lenses
-    , splitAt
-    , span
-    , break
-
-    -- * Splitters
-    , splitWith
-    , split
-    , chunksOf
-    , groupBy
-    , group
-    , lines
-    , words
-
-    -- * Transforming Byte Streams
-    , intersperse
-    , pack
-
-    -- * Joiners
-    , intercalate
-
-    -- * Parsers
+    -- * Parsing
     -- $parse
     , nextByte
     , drawByte
     , unDrawByte
     , peekByte
     , isEndOfBytes
+
+    -- * Parsing Lenses
+    , splitAt
+    , span
+    , break
+
+    -- * Transforming Byte Streams
+    , intersperse
+    , pack
+
+    -- * FreeT Splitters
+    , chunksOf
+    , splitsWith
+    , splits
+    , groupsBy
+    , groups
+    , lines
+    , words
 
     -- * Re-exports
     -- $reexports
@@ -545,6 +542,81 @@ count :: (Monad m, Num n) => Word8 -> Producer ByteString m () -> m n
 count w8 p = P.fold (+) 0 id (p >-> P.map (fromIntegral . BS.count w8))
 {-# INLINABLE count #-}
 
+{-| Consume the first byte from a byte stream
+
+    'next' either fails with a 'Left' if the 'Producer' has no more bytes or
+    succeeds with a 'Right' providing the next byte and the remainder of the
+    'Producer'.
+-}
+nextByte
+    :: (Monad m)
+    => Producer ByteString m r
+    -> m (Either r (Word8, Producer ByteString m r))
+nextByte = go
+  where
+    go p = do
+        x <- next p
+        case x of
+            Left   r       -> return (Left r)
+            Right (bs, p') -> case (BS.uncons bs) of
+                Nothing        -> go p'
+                Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
+{-# INLINABLE nextByte #-}
+
+{-| Draw one 'Word8' from the underlying 'Producer', returning 'Nothing' if the
+    'Producer' is empty
+-}
+drawByte :: (Monad m) => Parser ByteString m (Maybe Word8)
+drawByte = do
+    x <- PP.draw
+    case x of
+        Nothing -> return Nothing
+        Just bs -> case (BS.uncons bs) of
+            Nothing        -> drawByte
+            Just (w8, bs') -> do
+                PP.unDraw bs'
+                return (Just w8)
+{-# INLINABLE drawByte #-}
+
+-- | Push back a 'Word8' onto the underlying 'Producer'
+unDrawByte :: (Monad m) => Word8 -> Parser ByteString m ()
+unDrawByte w8 = modify (yield (BS.singleton w8) >>)
+{-# INLINABLE unDrawByte #-}
+
+{-| 'peekByte' checks the first 'Word8' in the stream, but uses 'unDrawByte' to
+    push the 'Word8' back
+
+> peekByte = do
+>     x <- drawByte
+>     case x of
+>         Nothing -> return ()
+>         Just w8 -> unDrawByte w8
+>     return x
+-}
+peekByte :: (Monad m) => Parser ByteString m (Maybe Word8)
+peekByte = do
+    x <- drawByte
+    case x of
+        Nothing -> return ()
+        Just w8 -> unDrawByte w8
+    return x
+{-# INLINABLE peekByte #-}
+
+{-| Check if the underlying 'Producer' has no more bytes
+
+    Note that this will skip over empty 'ByteString' chunks, unlike
+    'Pipes.Parse.isEndOfInput' from @pipes-parse@.
+
+> isEndOfBytes = liftM isNothing peekByte
+-}
+isEndOfBytes :: (Monad m) => Parser ByteString m Bool
+isEndOfBytes = do
+    x <- peekByte
+    return (case x of
+        Nothing -> True
+        Just _  -> False )
+{-# INLINABLE isEndOfBytes #-}
+
 {-| Improper lens from a 'Producer' to two 'Producer's split after the given
     number of bytes
 -}
@@ -617,38 +689,51 @@ break
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
-{-| Split a byte stream into groups separated by bytes that satisfy the
-    predicate
--}
-splitWith
-    :: (Monad m)
-    => (Word8 -> Bool)
-    -> Producer ByteString m e -> FreeT (Producer ByteString m) m e
-splitWith predicate p0 = PP.FreeT (go0 p0)
+-- | Intersperse a 'Word8' in between the bytes of the byte stream
+intersperse
+    :: (Monad m) => Word8 -> Producer ByteString m r -> Producer ByteString m r
+intersperse w8 = go0
   where
     go0 p = do
-        x <- next p
+        x <- lift (next p)
         case x of
-            Left   r       -> return (PP.Pure r)
-            Right (bs, p') ->
-                if (BS.null bs)
-                then go0 p'
-                else go1 (yield bs >> p')
-    go1 p = return $ PP.Free $ do
-        p' <- p^.span (not . predicate)
-        return $ PP.FreeT $ do
-            x <- nextByte p'
-            case x of
-                Left   r       -> return (PP.Pure r)
-                Right (_, p'') -> go1 p''
-{-# INLINABLE splitWith #-}
+            Left   r       -> return r
+            Right (bs, p') -> do
+                yield (BS.intersperse w8 bs)
+                go1 p'
+    go1 p = do
+        x <- lift (next p)
+        case x of
+            Left   r       -> return r
+            Right (bs, p') -> do
+                yield (BS.singleton w8)
+                yield (BS.intersperse w8 bs)
+                go1 p'
+{-# INLINABLE intersperse #-}
 
--- | Split a byte stream into groups separated by the given byte
-split
-    :: (Monad m)
-    => Word8 -> Producer ByteString m e -> FreeT (Producer ByteString m) m e
-split w8 = splitWith (w8 ==)
-{-# INLINABLE split #-}
+{-| An improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
+    using a default chunk size when packing
+
+> pack :: (Monad m) => Iso' (Producer Word8 m e) (Producer ByteString m e)
+-}
+pack
+    :: (Functor f, Monad m, Profunctor p)
+    => p (Producer ByteString m e) (f (Producer ByteString m e))
+    -- ^
+    -> p (Producer Word8      m e) (f (Producer Word8      m e))
+    -- ^
+pack = Data.Profunctor.dimap to (fmap from)
+  where
+    -- to :: (Monad m) => Producer Word8 m e -> Producer ByteString m e
+    to p = PP.folds step id done (p^.PP.chunksOf defaultChunkSize)
+
+    step diffAs w8 = diffAs . (w8:)
+
+    done diffAs = BS.pack (diffAs [])
+
+    -- from :: (Monad m) => Producer ByteString m e -> Producer Word8 m e
+    from p = for p (each . BS.unpack)
+{-# INLINABLE pack #-}
 
 -- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
 chunksOf
@@ -666,21 +751,56 @@ chunksOf n k p0 = fmap concats (k (go p0))
                 return (go p'')
 {-# INLINABLE chunksOf #-}
 
+{-| Split a byte stream into groups separated by bytes that satisfy the
+    predicate
+-}
+splitsWith
+    :: (Monad m)
+    => (Word8 -> Bool)
+    -> Producer ByteString m e -> FreeT (Producer ByteString m) m e
+splitsWith predicate p0 = PP.FreeT (go0 p0)
+  where
+    go0 p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PP.Pure r)
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go0 p'
+                else go1 (yield bs >> p')
+    go1 p = return $ PP.Free $ do
+        p' <- p^.span (not . predicate)
+        return $ PP.FreeT $ do
+            x <- nextByte p'
+            case x of
+                Left   r       -> return (PP.Pure r)
+                Right (_, p'') -> go1 p''
+{-# INLINABLE splitsWith #-}
+
+-- | Split a byte stream into groups separated by the given byte
+splits
+    :: (Monad m)
+    => Word8
+    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e) 
+splits w8 k p =
+    fmap (PP.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
+{-# INLINABLE splits #-}
+
 {-| Isomorphism between a byte stream and groups of identical bytes using the
     supplied equality predicate
 -}
-groupBy
+groupsBy
     :: (Monad m)
     => (Word8 -> Word8 -> Bool)
     -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
-groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
+groupsBy equals k p0 = fmap concats (k (_groupsBy equals p0))
   where
-    -- _groupBy
+    -- _groupsBy
     --     :: (Monad m)
     --     => (Word8 -> Word8 -> Bool)
     --     -> Producer ByteString m e
     --     -> FreeT (Producer ByteString m) m e
-    _groupBy equal p0' = PP.FreeT (go p0')
+    _groupsBy equal p0' = PP.FreeT (go p0')
       where
         go p = do
             x <- next p
@@ -692,14 +812,14 @@ groupBy equals k p0 = fmap concats (k (_groupBy equals p0))
                         return $ PP.Free $ do
                             p'' <- (yield bs >> p')^.span (equal w8)
                             return $ PP.FreeT (go p'')
-{-# INLINABLE groupBy #-}
+{-# INLINABLE groupsBy #-}
 
--- | Like 'groupBy', where the equality predicate is ('==')
-group
+-- | Like 'groupsBy', where the equality predicate is ('==')
+groups
     :: (Monad m)
     => Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
-group = groupBy (==)
-{-# INLINABLE group #-}
+groups = groupsBy (==)
+{-# INLINABLE groups #-}
 
 {-| Improper isomorphism between a bytestream and its lines
 
@@ -791,161 +911,13 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
     -- _unwords
     --     :: (Monad m)
     --     => FreeT (Producer ByteString m) m e -> Producer ByteString m e
-    _unwords = intercalate (yield $ BS.singleton $ fromIntegral $ ord ' ')
+    _unwords = PP.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
-
--- | Intersperse a 'Word8' in between the bytes of the byte stream
-intersperse
-    :: (Monad m) => Word8 -> Producer ByteString m r -> Producer ByteString m r
-intersperse w8 = go0
-  where
-    go0 p = do
-        x <- lift (next p)
-        case x of
-            Left   r       -> return r
-            Right (bs, p') -> do
-                yield (BS.intersperse w8 bs)
-                go1 p'
-    go1 p = do
-        x <- lift (next p)
-        case x of
-            Left   r       -> return r
-            Right (bs, p') -> do
-                yield (BS.singleton w8)
-                yield (BS.intersperse w8 bs)
-                go1 p'
-{-# INLINABLE intersperse #-}
-
-{-| An improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
-    using a default chunk size when packing
-
-> pack :: (Monad m) => Iso' (Producer Word8 m e) (Producer ByteString m e)
--}
-pack
-    :: (Functor f, Monad m, Profunctor p)
-    => p (Producer ByteString m e) (f (Producer ByteString m e))
-    -- ^
-    -> p (Producer Word8      m e) (f (Producer Word8      m e))
-    -- ^
-pack = Data.Profunctor.dimap to (fmap from)
-  where
-    -- to :: (Monad m) => Producer Word8 m e -> Producer ByteString m e
-    to p = PP.folds step id done (p^.PP.chunksOf defaultChunkSize)
-
-    step diffAs w8 = diffAs . (w8:)
-
-    done diffAs = BS.pack (diffAs [])
-
-    -- from :: (Monad m) => Producer ByteString m e -> Producer Word8 m e
-    from p = for p (each . BS.unpack)
-{-# INLINABLE pack #-}
-
-{-| 'intercalate' concatenates the 'FreeT'-delimited byte streams after
-    interspersing a byte stream in between them
--}
-intercalate
-    :: (Monad m)
-    => Producer ByteString m ()
-    -> FreeT (Producer ByteString m) m e
-    -> Producer ByteString m e
-intercalate p0 = go0
-  where
-    go0 f = do
-        x <- lift (PP.runFreeT f)
-        case x of
-            PP.Pure r -> return r
-            PP.Free p -> do
-                f' <- p
-                go1 f'
-    go1 f = do
-        x <- lift (PP.runFreeT f)
-        case x of
-            PP.Pure r -> return r
-            PP.Free p -> do
-                p0
-                f' <- p
-                go1 f'
-{-# INLINABLE intercalate #-}
 
 {- $parse
     The following parsing utilities are single-byte analogs of the ones found
     in @pipes-parse@.
 -}
-
-{-| Consume the first byte from a byte stream
-
-    'next' either fails with a 'Left' if the 'Producer' has no more bytes or
-    succeeds with a 'Right' providing the next byte and the remainder of the
-    'Producer'.
--}
-nextByte
-    :: (Monad m)
-    => Producer ByteString m r
-    -> m (Either r (Word8, Producer ByteString m r))
-nextByte = go
-  where
-    go p = do
-        x <- next p
-        case x of
-            Left   r       -> return (Left r)
-            Right (bs, p') -> case (BS.uncons bs) of
-                Nothing        -> go p'
-                Just (w8, bs') -> return (Right (w8, yield bs' >> p'))
-{-# INLINABLE nextByte #-}
-
-{-| Draw one 'Word8' from the underlying 'Producer', returning 'Nothing' if the
-    'Producer' is empty
--}
-drawByte :: (Monad m) => Parser ByteString m (Maybe Word8)
-drawByte = do
-    x <- PP.draw
-    case x of
-        Nothing -> return Nothing
-        Just bs -> case (BS.uncons bs) of
-            Nothing        -> drawByte
-            Just (w8, bs') -> do
-                PP.unDraw bs'
-                return (Just w8)
-{-# INLINABLE drawByte #-}
-
--- | Push back a 'Word8' onto the underlying 'Producer'
-unDrawByte :: (Monad m) => Word8 -> Parser ByteString m ()
-unDrawByte w8 = modify (yield (BS.singleton w8) >>)
-{-# INLINABLE unDrawByte #-}
-
-{-| 'peekByte' checks the first 'Word8' in the stream, but uses 'unDrawByte' to
-    push the 'Word8' back
-
-> peekByte = do
->     x <- drawByte
->     case x of
->         Nothing -> return ()
->         Just w8 -> unDrawByte w8
->     return x
--}
-peekByte :: (Monad m) => Parser ByteString m (Maybe Word8)
-peekByte = do
-    x <- drawByte
-    case x of
-        Nothing -> return ()
-        Just w8 -> unDrawByte w8
-    return x
-{-# INLINABLE peekByte #-}
-
-{-| Check if the underlying 'Producer' has no more bytes
-
-    Note that this will skip over empty 'ByteString' chunks, unlike
-    'Pipes.Parse.isEndOfInput' from @pipes-parse@.
-
-> isEndOfBytes = liftM isNothing peekByte
--}
-isEndOfBytes :: (Monad m) => Parser ByteString m Bool
-isEndOfBytes = do
-    x <- peekByte
-    return (case x of
-        Nothing -> True
-        Just _  -> False )
-{-# INLINABLE isEndOfBytes #-}
 
 {- $reexports
     @Data.ByteString@ re-exports the 'ByteString' type.
