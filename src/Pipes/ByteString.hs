@@ -22,11 +22,11 @@
 >     runEffect $ P.fromHandle hIn >-> P.toHandle hOut
 
     You can stream to and from 'stdin' and 'stdout' using the predefined 'stdin'
-    and 'stdout' proxies, like in the following \"echo\" program:
+    and 'stdout' pipes, like in the following \"echo\" program:
 
 > main = runEffect $ P.stdin >-> P.stdout
 
-    You can also translate pure lazy 'BL.ByteString's to and from proxies:
+    You can also translate pure lazy 'BL.ByteString's to and from pipes:
 
 > import qualified Data.ByteString.Lazy.Char8 as BL
 >
@@ -274,8 +274,6 @@ hGetN h = go
 {-| Stream bytes to 'stdout'
 
     Unlike 'toHandle', 'stdout' gracefully terminates on a broken output pipe.
-
-> p >-> stdout = for p (liftIO . putStr)
 -}
 stdout :: MonadIO m => Consumer' ByteString m ()
 stdout = go
@@ -628,8 +626,8 @@ isEndOfBytes = do
 splitAt
     :: (Monad m, Integral n)
     => n
-    -> Lens' (Producer ByteString m e)
-             (Producer ByteString m (Producer ByteString m e))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 splitAt n0 k p0 = fmap join (k (go n0 p0))
   where
     -- go  :: (Monad m, Integral n)
@@ -663,8 +661,8 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
 span
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens' (Producer ByteString m e)
-             (Producer ByteString m (Producer ByteString m e))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 span predicate k p0 = fmap join (k (go p0))
   where
     go p = do
@@ -689,8 +687,8 @@ span predicate k p0 = fmap join (k (go p0))
 break
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens' (Producer ByteString m e)
-             (Producer ByteString m (Producer ByteString m e))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
@@ -785,24 +783,24 @@ intersperse w8 = go0
 {-| An improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
     using a default chunk size when packing
 
-> pack :: Monad m => Iso' (Producer Word8 m e) (Producer ByteString m e)
+> pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
 -}
 pack
     :: (Functor f, Monad m, Profunctor p)
-    => p (Producer ByteString m e) (f (Producer ByteString m e))
+    => p (Producer ByteString m x) (f (Producer ByteString m x))
     -- ^
-    -> p (Producer Word8      m e) (f (Producer Word8      m e))
+    -> p (Producer Word8      m x) (f (Producer Word8      m x))
     -- ^
 pack = Data.Profunctor.dimap to (fmap from)
   where
-    -- to :: Monad m => Producer Word8 m e -> Producer ByteString m e
+    -- to :: Monad m => Producer Word8 m x -> Producer ByteString m x
     to p = PP.folds step id done (p^.PP.chunksOf defaultChunkSize)
 
     step diffAs w8 = diffAs . (w8:)
 
     done diffAs = BS.pack (diffAs [])
 
-    -- from :: Monad m => Producer ByteString m e -> Producer Word8 m e
+    -- from :: Monad m => Producer ByteString m x -> Producer Word8 m x
     from p = for p (each . BS.unpack)
 {-# INLINABLE pack #-}
 
@@ -810,7 +808,7 @@ pack = Data.Profunctor.dimap to (fmap from)
 chunksOf
     :: (Monad m, Integral n)
     => n
-    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 chunksOf n k p0 = fmap concats (k (go p0))
   where
     go p = PP.FreeT $ do
@@ -828,7 +826,7 @@ chunksOf n k p0 = fmap concats (k (go p0))
 splitsWith
     :: Monad m
     => (Word8 -> Bool)
-    -> Producer ByteString m e -> FreeT (Producer ByteString m) m e
+    -> Producer ByteString m x -> FreeT (Producer ByteString m) m x
 splitsWith predicate p0 = PP.FreeT (go0 p0)
   where
     go0 p = do
@@ -852,7 +850,7 @@ splitsWith predicate p0 = PP.FreeT (go0 p0)
 splits
     :: Monad m
     => Word8
-    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e) 
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 splits w8 k p =
     fmap (PP.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
 {-# INLINABLE splits #-}
@@ -863,14 +861,14 @@ splits w8 k p =
 groupsBy
     :: Monad m
     => (Word8 -> Word8 -> Bool)
-    -> Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
   where
     -- _groupsBy
     --     :: Monad m
     --     => (Word8 -> Word8 -> Bool)
-    --     -> Producer ByteString m e
-    --     -> FreeT (Producer ByteString m) m e
+    --     -> Producer ByteString m x
+    --     -> FreeT (Producer ByteString m) m x
     _groupsBy p0' = PP.FreeT (go p0')
       where
         go p = do
@@ -888,7 +886,7 @@ groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
 -- | Like 'groupsBy', where the equality predicate is ('==')
 groups
     :: Monad m
-    => Lens' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
+    => Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 groups = groupsBy (==)
 {-# INLINABLE groups #-}
 
@@ -900,20 +898,20 @@ groups = groupsBy (==)
 
 > lines
 >     :: Monad m
->     => Iso' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
+>     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 lines
     :: (Functor f, Monad m, Profunctor p)
-    => p (FreeT (Producer ByteString m) m e)
-         (f (FreeT (Producer ByteString m) m e) )
+    => p (FreeT (Producer ByteString m) m x)
+         (f (FreeT (Producer ByteString m) m x) )
     -- ^
-    -> p (Producer ByteString m e) (f (Producer ByteString m e))
+    -> p (Producer ByteString m x) (f (Producer ByteString m x))
     -- ^
 lines = Data.Profunctor.dimap _lines (fmap _unlines)
   where
     -- _lines
     --     :: Monad m
-    --     => Producer ByteString m e -> FreeT (Producer ByteString m) m e
+    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
     _lines p0 = PP.FreeT (go0 p0)
       where
         go0 p = do
@@ -934,7 +932,7 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
 
     -- _unlines
     --     :: Monad m
-    --      => FreeT (Producer ByteString m) m e -> Producer ByteString m e
+    --      => FreeT (Producer ByteString m) m x -> Producer ByteString m x
     _unlines = PP.concats . PP.transFreeT addNewline
 
     -- addNewline
@@ -950,20 +948,20 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
 
 > words
 >     :: Monad m
->     => Iso' (Producer ByteString m e) (FreeT (Producer ByteString m) m e)
+>     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 words
     :: (Functor f, Monad m, Profunctor p)
-    => p    (FreeT (Producer ByteString m) m e)
-         (f (FreeT (Producer ByteString m) m e))
+    => p    (FreeT (Producer ByteString m) m x)
+         (f (FreeT (Producer ByteString m) m x))
     -- ^
-    -> p (Producer ByteString m e) (f (Producer ByteString m e))
+    -> p (Producer ByteString m x) (f (Producer ByteString m x))
     -- ^
 words = Data.Profunctor.dimap _words (fmap _unwords)
   where
     -- _words
     --     :: Monad m
-    --     => Producer ByteString m e -> FreeT (Producer ByteString m) m e
+    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
     _words = go
       where
         go p = PP.FreeT $ do
@@ -976,7 +974,7 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
 
     -- _unwords
     --     :: Monad m
-    --     => FreeT (Producer ByteString m) m e -> Producer ByteString m e
+    --     => FreeT (Producer ByteString m) m x -> Producer ByteString m x
     _unwords = PP.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
 
