@@ -163,7 +163,7 @@ import Lens.Family2 (Lens')
 import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
-import Pipes.Parse (Parser, concats, FreeT)
+import Pipes.Parse (Parser, concats, intercalates, FreeT)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
@@ -992,5 +992,6 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
 
     @Data.Word@ re-exports the 'Word8' type.
 
-    @Pipes.Parse@ re-exports 'Parser', 'concats', and 'FreeT' (the type).
+    @Pipes.Parse@ re-exports 'Parser', 'concats', 'intercalates', and 'FreeT'
+    (the type).
 -}
