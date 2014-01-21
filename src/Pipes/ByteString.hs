@@ -114,8 +114,8 @@ module Pipes.ByteString (
     , splitAt
     , span
     , break
-    , group
     , groupBy
+    , group
     , word
     , line
 
@@ -620,9 +620,7 @@ isEndOfBytes = do
         Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
-{-| Improper lens from a 'Producer' to two 'Producer's split after the given
-    number of bytes
--}
+-- | Improper lens that splits a 'Producer' after the given number of bytes
 splitAt
     :: (Monad m, Integral n)
     => n
@@ -654,9 +652,8 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
                             return (yield suffix >> p')
 {-# INLINABLE splitAt #-}
 
-{-| 'span' is an improper lens from a 'Producer' to two 'Producer's, where the
-    outer 'Producer' is the longest consecutive group of bytes that satisfy the
-    given predicate
+{-| Improper lens that splits after the longest consecutive group of bytes that
+    satisfy the given predicate
 -}
 span
     :: Monad m
@@ -680,9 +677,8 @@ span predicate k p0 = fmap join (k (go p0))
                         return (yield suffix >> p')
 {-# INLINABLE span #-}
 
-{-| 'break' is an improper lens from a 'Producer' to two 'Producer's, where
-     the outer 'Producer' is the longest consecutive group of bytes that fail
-     the given predicate
+{-| Improper lens that splits after the longest consecutive group of bytes that
+    fail the given predicate
 -}
 break
     :: Monad m
@@ -692,8 +688,7 @@ break
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
-{-| 'groupBy' is an improper lens from a 'Producer' to two 'Producer's, where
-    the outer 'Producer' is the first group of consecutive matching bytes, as
+{-| Improper lens that splits after the first group of matching bytes, as
     defined by the given equality predicate
 -}
 groupBy
@@ -727,6 +722,10 @@ group = groupBy (==)
 {-| Improper lens that splits a 'Producer' after the first word
 
     Unlike 'words', this does not drop leading whitespace
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 word
     :: Monad m
@@ -750,6 +749,10 @@ nl = fromIntegral (ord '\n')
 
     Unlike 'lines', this does not consume the newline marker, which is stored
     within the inner 'Producer'
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the upcoming @pipes-text@ library.
 -}
 line
     :: Monad m
@@ -780,8 +783,7 @@ intersperse w8 = go0
                 go1 p'
 {-# INLINABLE intersperse #-}
 
-{-| An improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
-    using a default chunk size when packing
+{-| Improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
 
 > pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
 -}
