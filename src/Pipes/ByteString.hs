@@ -116,6 +116,8 @@ module Pipes.ByteString (
     , break
     , group
     , groupBy
+    , word
+    , line
 
     -- * Transforming Byte Streams
     , intersperse
@@ -724,6 +726,40 @@ group
 group = groupBy (==)
 {-# INLINABLE group #-}
 
+{-| Improper lens that splits a 'Producer' after the first word
+
+    Unlike 'words', this does not drop leading whitespace
+-}
+word
+    :: Monad m
+    => Lens' (Producer ByteString m r)
+             (Producer ByteString m (Producer ByteString m r))
+word k p0 = fmap join (k (to p0))
+  where
+    -- to
+    --     :: Monad m
+    --     => Producer ByteString m r
+    --     -> Producer ByteString m (Producer ByteString m r)
+    to p = do
+        p' <- p^.span isSpaceWord8
+        p'^.break isSpaceWord8
+{-# INLINABLE word #-}
+
+nl :: Word8
+nl = fromIntegral (ord '\n')
+
+{-| Improper lens that splits a 'Producer' after the first line
+
+    Unlike 'lines', this does not consume the newline marker, which is stored
+    within the inner 'Producer'
+-}
+line
+    :: Monad m
+    => Lens' (Producer ByteString m r)
+             (Producer ByteString m (Producer ByteString m r))
+line = break (== nl)
+{-# INLINABLE line #-}
+
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
     :: Monad m => Word8 -> Producer ByteString m r -> Producer ByteString m r
@@ -889,7 +925,7 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
                     then go0 p'
                     else return $ PP.Free $ go1 (yield bs >> p')
         go1 p = do
-            p' <- p^.break (fromIntegral (ord '\n') ==)
+            p' <- p^.line
             return $ PP.FreeT $ do
                 x  <- nextByte p'
                 case x of
@@ -903,7 +939,7 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
 
     -- addNewline
     --     :: Monad m => Producer ByteString m r -> Producer ByteString m r
-    addNewline p = p <* yield (BS.singleton (fromIntegral (ord '\n')))
+    addNewline p = p <* yield (BS.singleton nl)
 {-# INLINABLE lines #-}
 
 {-| Improper isomorphism between a bytestream and its words
