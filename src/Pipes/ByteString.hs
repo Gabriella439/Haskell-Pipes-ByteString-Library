@@ -159,7 +159,6 @@ import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
-import Lens.Family2 (Lens')
 import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Parse as PP
@@ -620,6 +619,10 @@ isEndOfBytes = do
         Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
+type Lens' a b = forall f . Functor f => (b -> f b) -> (a -> f a)
+
+type Iso' a b = forall f p . (Functor f, Profunctor p) => p b (f b) -> p a (f a)
+
 -- | Improper lens that splits a 'Producer' after the given number of bytes
 splitAt
     :: (Monad m, Integral n)
@@ -783,16 +786,8 @@ intersperse w8 = go0
                 go1 p'
 {-# INLINABLE intersperse #-}
 
-{-| Improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
-
-> pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
--}
-pack
-    :: (Functor f, Monad m, Profunctor p)
-    => p (Producer ByteString m x) (f (Producer ByteString m x))
-    -- ^
-    -> p (Producer Word8      m x) (f (Producer Word8      m x))
-    -- ^
+-- | Improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
+pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
 pack = Data.Profunctor.dimap to (fmap from)
   where
     -- to :: Monad m => Producer Word8 m x -> Producer ByteString m x
@@ -897,18 +892,10 @@ groups = groupsBy (==)
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
     this function from the upcoming @pipes-text@ library.
-
-> lines
->     :: Monad m
->     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 lines
-    :: (Functor f, Monad m, Profunctor p)
-    => p (FreeT (Producer ByteString m) m x)
-         (f (FreeT (Producer ByteString m) m x) )
-    -- ^
-    -> p (Producer ByteString m x) (f (Producer ByteString m x))
-    -- ^
+    :: Monad m
+    => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 lines = Data.Profunctor.dimap _lines (fmap _unlines)
   where
     -- _lines
@@ -947,18 +934,10 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
     this function from the upcoming @pipes-text@ library.
-
-> words
->     :: Monad m
->     => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 -}
 words
-    :: (Functor f, Monad m, Profunctor p)
-    => p    (FreeT (Producer ByteString m) m x)
-         (f (FreeT (Producer ByteString m) m x))
-    -- ^
-    -> p (Producer ByteString m x) (f (Producer ByteString m x))
-    -- ^
+    :: Monad m
+    => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 words = Data.Profunctor.dimap _words (fmap _unwords)
   where
     -- _words
