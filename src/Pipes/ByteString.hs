@@ -137,6 +137,7 @@ module Pipes.ByteString (
     , module Data.ByteString
     , module Data.Profunctor
     , module Data.Word
+    , module Pipes.Group
     , module Pipes.Parse
     ) where
 
@@ -161,8 +162,10 @@ import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
 import Pipes
 import Pipes.Core (respond, Server')
+import qualified Pipes.Group as PG
+import Pipes.Group (concats, intercalates, FreeT)
 import qualified Pipes.Parse as PP
-import Pipes.Parse (Parser, concats, intercalates, FreeT)
+import Pipes.Parse (Parser)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
 import Prelude hiding (
@@ -791,7 +794,7 @@ pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
 pack = Data.Profunctor.dimap to (fmap from)
   where
     -- to :: Monad m => Producer Word8 m x -> Producer ByteString m x
-    to p = PP.folds step id done (p^.PP.chunksOf defaultChunkSize)
+    to p = PG.folds step id done (p^.PG.chunksOf defaultChunkSize)
 
     step diffAs w8 = diffAs . (w8:)
 
@@ -808,11 +811,11 @@ chunksOf
     -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 chunksOf n k p0 = fmap concats (k (go p0))
   where
-    go p = PP.FreeT $ do
+    go p = PG.FreeT $ do
         x <- next p
         return $ case x of
-            Left   r       -> PP.Pure r
-            Right (bs, p') -> PP.Free $ do
+            Left   r       -> PG.Pure r
+            Right (bs, p') -> PG.Free $ do
                 p'' <- (yield bs >> p')^.splitAt n
                 return (go p'')
 {-# INLINABLE chunksOf #-}
@@ -824,22 +827,22 @@ splitsWith
     :: Monad m
     => (Word8 -> Bool)
     -> Producer ByteString m x -> FreeT (Producer ByteString m) m x
-splitsWith predicate p0 = PP.FreeT (go0 p0)
+splitsWith predicate p0 = PG.FreeT (go0 p0)
   where
     go0 p = do
         x <- next p
         case x of
-            Left   r       -> return (PP.Pure r)
+            Left   r       -> return (PG.Pure r)
             Right (bs, p') ->
                 if (BS.null bs)
                 then go0 p'
                 else go1 (yield bs >> p')
-    go1 p = return $ PP.Free $ do
+    go1 p = return $ PG.Free $ do
         p' <- p^.break predicate
-        return $ PP.FreeT $ do
+        return $ PG.FreeT $ do
             x <- nextByte p'
             case x of
-                Left   r       -> return (PP.Pure r)
+                Left   r       -> return (PG.Pure r)
                 Right (_, p'') -> go1 p''
 {-# INLINABLE splitsWith #-}
 
@@ -849,7 +852,7 @@ splits
     => Word8
     -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 splits w8 k p =
-    fmap (PP.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
+    fmap (PG.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
 {-# INLINABLE splits #-}
 
 {-| Isomorphism between a byte stream and groups of identical bytes using the
@@ -866,18 +869,18 @@ groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
     --     => (Word8 -> Word8 -> Bool)
     --     -> Producer ByteString m x
     --     -> FreeT (Producer ByteString m) m x
-    _groupsBy p0' = PP.FreeT (go p0')
+    _groupsBy p0' = PG.FreeT (go p0')
       where
         go p = do
             x <- next p
             case x of
-                Left   r       -> return (PP.Pure r)
+                Left   r       -> return (PG.Pure r)
                 Right (bs, p') -> case (BS.uncons bs) of
                     Nothing      -> go p'
                     Just (w8, _) -> do
-                        return $ PP.Free $ do
+                        return $ PG.Free $ do
                             p'' <- (yield bs >> p')^.span (equals w8)
-                            return $ PP.FreeT (go p'')
+                            return $ PG.FreeT (go p'')
 {-# INLINABLE groupsBy #-}
 
 -- | Like 'groupsBy', where the equality predicate is ('==')
@@ -901,28 +904,28 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
     -- _lines
     --     :: Monad m
     --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
-    _lines p0 = PP.FreeT (go0 p0)
+    _lines p0 = PG.FreeT (go0 p0)
       where
         go0 p = do
             x <- next p
             case x of
-                Left   r       -> return (PP.Pure r)
+                Left   r       -> return (PG.Pure r)
                 Right (bs, p') ->
                     if (BS.null bs)
                     then go0 p'
-                    else return $ PP.Free $ go1 (yield bs >> p')
+                    else return $ PG.Free $ go1 (yield bs >> p')
         go1 p = do
             p' <- p^.line
-            return $ PP.FreeT $ do
+            return $ PG.FreeT $ do
                 x  <- nextByte p'
                 case x of
-                    Left   r       -> return (PP.Pure r)
+                    Left   r       -> return (PG.Pure r)
                     Right (_, p'') -> go0 p''
 
     -- _unlines
     --     :: Monad m
     --      => FreeT (Producer ByteString m) m x -> Producer ByteString m x
-    _unlines = PP.concats . PP.transFreeT addNewline
+    _unlines = concats . PG.transFreeT addNewline
 
     -- addNewline
     --     :: Monad m => Producer ByteString m r -> Producer ByteString m r
@@ -945,18 +948,18 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
     --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
     _words = go
       where
-        go p = PP.FreeT $ do
+        go p = PG.FreeT $ do
             x <- next (p >-> dropWhile isSpaceWord8)
             return $ case x of
-                Left   r       -> PP.Pure r
-                Right (bs, p') -> PP.Free $ do
+                Left   r       -> PG.Pure r
+                Right (bs, p') -> PG.Free $ do
                     p'' <- (yield bs >> p')^.break isSpaceWord8
                     return (go p'')
 
     -- _unwords
     --     :: Monad m
     --     => FreeT (Producer ByteString m) m x -> Producer ByteString m x
-    _unwords = PP.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
+    _unwords = PG.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
 
 {- $parse
@@ -971,6 +974,8 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
 
     @Data.Word@ re-exports the 'Word8' type.
 
-    @Pipes.Parse@ re-exports 'Parser', 'concats', 'intercalates', and 'FreeT'
+    @Pipes.Parse@ re-exports 'Parser'.
+
+    @Pipes.Group@ re-exports 'concats', 'intercalates', and 'FreeT'
     (the type).
 -}
