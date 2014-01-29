@@ -963,15 +963,13 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
     -- _words
     --     :: Monad m
     --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
-    _words = go
-      where
-        go p = PG.FreeT $ do
+    _words p = PG.FreeT $ do
             x <- next (p >-> dropWhile isSpaceWord8)
             return $ case x of
                 Left   r       -> PG.Pure r
                 Right (bs, p') -> PG.Free $ do
                     p'' <- (yield bs >> p')^.break isSpaceWord8
-                    return (go p'')
+                    return (_words p'')
 
     -- _unwords
     --     :: Monad m
