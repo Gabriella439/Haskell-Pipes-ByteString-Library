@@ -122,6 +122,7 @@ module Pipes.ByteString (
     -- * Transforming Byte Streams
     , intersperse
     , pack
+    , chunksOf'
 
     -- * FreeT Splitters
     , chunksOf
@@ -804,6 +805,22 @@ pack = Data.Profunctor.dimap to (fmap from)
     from p = for p (each . BS.unpack)
 {-# INLINABLE pack #-}
 
+{-| Group byte stream chunks into chunks of fixed length
+
+    Note: This is the /only/ function in this API that concatenates
+    'ByteString' chunks, which requires allocating new `ByteString`s
+-}
+chunksOf'
+    :: (Monad m, Integral n)
+    => n -> Producer ByteString m r -> Producer ByteString m r
+chunksOf' n p =
+    PG.folds
+        (\diffBs bs -> diffBs . (bs:))
+        id
+        (\diffBs -> BS.concat (diffBs []))
+        (p ^. chunksOf n)
+{-# INLINABLE chunksOf' #-}
+
 -- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
 chunksOf
     :: (Monad m, Integral n)
@@ -925,7 +942,7 @@ lines = Data.Profunctor.dimap _lines (fmap _unlines)
     -- _unlines
     --     :: Monad m
     --      => FreeT (Producer ByteString m) m x -> Producer ByteString m x
-    _unlines = concats . PG.transFreeT addNewline
+    _unlines = concats . PG.maps addNewline
 
     -- addNewline
     --     :: Monad m => Producer ByteString m r -> Producer ByteString m r
