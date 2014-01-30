@@ -118,13 +118,11 @@ module Pipes.ByteString (
     , group
     , word
     , line
-
-    -- * Transforming Byte Streams
     , intersperse
     , pack
     , chunksOf'
 
-    -- * FreeT Splitters
+    -- * FreeT
     , chunksOf
     , splitsWith
     , splits
@@ -138,6 +136,7 @@ module Pipes.ByteString (
     , module Data.ByteString
     , module Data.Profunctor
     , module Data.Word
+    , module Lens.Family
     , module Pipes.Group
     , module Pipes.Parse
     ) where
@@ -153,7 +152,6 @@ import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Char (ord)
-import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
 import Data.Profunctor (Profunctor)
 import qualified Data.Profunctor
@@ -161,6 +159,8 @@ import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
 import qualified GHC.IO.Exception as G
+import Lens.Family (Phantom)
+import Lens.Family as NoReexport
 import Pipes
 import Pipes.Core (respond, Server')
 import qualified Pipes.Group as PG
@@ -243,9 +243,6 @@ hGet size h = go
                 yield bs
                 go
 {-# INLINABLE hGet #-}
-
-(^.) :: a -> ((b -> Constant b b) -> (a -> Constant b a)) -> b
-a ^. lens = getConstant (lens Constant a)
 
 {-| Like 'hGetSome', except you can vary the maximum chunk size for each request
 -}
@@ -623,7 +620,8 @@ isEndOfBytes = do
         Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
-type Lens' a b = forall f . Functor f => (b -> f b) -> (a -> f a)
+type Getter' a b = forall f . Phantom f => (b -> f b) -> (a -> f a)
+type Lens'   a b = forall f . Functor f => (b -> f b) -> (a -> f a)
 
 type Iso' a b = forall f p . (Functor f, Profunctor p) => p b (f b) -> p a (f a)
 
@@ -738,13 +736,13 @@ word
     :: Monad m
     => Lens' (Producer ByteString m r)
              (Producer ByteString m (Producer ByteString m r))
-word k p0 = fmap join (k (to p0))
+word k p0 = fmap join (k (_word p0))
   where
-    -- to
+    -- _word
     --     :: Monad m
     --     => Producer ByteString m r
     --     -> Producer ByteString m (Producer ByteString m r)
-    to p = do
+    _word p = do
         p' <- p^.span isSpaceWord8
         p'^.break isSpaceWord8
 {-# INLINABLE word #-}
@@ -770,8 +768,9 @@ line = break (== nl)
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
-    :: Monad m => Word8 -> Producer ByteString m r -> Producer ByteString m r
-intersperse w8 = go0
+    :: Monad m
+    => Word8 -> Getter' (Producer ByteString m r) (Producer ByteString m r)
+intersperse w8 = to go0
   where
     go0 p = do
         x <- lift (next p)
@@ -792,10 +791,10 @@ intersperse w8 = go0
 
 -- | Improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
 pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
-pack = Data.Profunctor.dimap to (fmap from)
+pack = Data.Profunctor.dimap _pack (fmap from)
   where
-    -- to :: Monad m => Producer Word8 m x -> Producer ByteString m x
-    to p = PG.folds step id done (p^.PG.chunksOf defaultChunkSize)
+    -- _pack :: Monad m => Producer Word8 m x -> Producer ByteString m x
+    _pack p = PG.folds step id done (p^.PG.chunksOf defaultChunkSize)
 
     step diffAs w8 = diffAs . (w8:)
 
@@ -812,8 +811,8 @@ pack = Data.Profunctor.dimap to (fmap from)
 -}
 chunksOf'
     :: (Monad m, Integral n)
-    => n -> Producer ByteString m r -> Producer ByteString m r
-chunksOf' n p =
+    => n -> Getter' (Producer ByteString m r) (Producer ByteString m r)
+chunksOf' n = to $ \p ->
     PG.folds
         (\diffBs bs -> diffBs . (bs:))
         id
@@ -983,14 +982,15 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
 -}
 
 {- $reexports
-    @Data.ByteString@ re-exports the 'ByteString' type.
+    "Data.ByteString" re-exports 'ByteString'.
 
-    @Data.Profunctor@ re-exports the 'Profunctor' type.
+    "Data.Profunctor" re-exports 'Profunctor'.
 
-    @Data.Word@ re-exports the 'Word8' type.
+    "Data.Word" re-exports 'Word8'.
 
-    @Pipes.Parse@ re-exports 'Parser'.
+    "Lens.Family" re-exports 'Phantom'.
 
-    @Pipes.Group@ re-exports 'concats', 'intercalates', and 'FreeT'
-    (the type).
+    "Pipes.Parse" re-exports 'Parser'.
+
+    "Pipes.Group" re-exports 'concats', 'intercalates', and 'FreeT' (the type).
 -}
