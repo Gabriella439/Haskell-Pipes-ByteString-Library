@@ -40,7 +40,7 @@
 > import Lens.Family (over)
 > import Pipes
 > import qualified Pipes.ByteString as PB
-> import Pipes.Parse (takes)
+> import Pipes.Group (takes)
 >
 > main = runEffect $ over PB.lines (takes 3) PB.stdin >-> PB.stdout
 
