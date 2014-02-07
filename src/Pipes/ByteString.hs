@@ -308,7 +308,7 @@ toHandle h = for cat (liftIO . BS.hPut h)
 -- | Apply a transformation to each 'Word8' in the stream
 map :: Monad m => (Word8 -> Word8) -> Pipe ByteString ByteString m r
 map f = P.map (BS.map f)
-{-# INLINABLE map #-}
+{-# INLINE map #-}
 
 -- | Map a function over the byte stream and concatenate the results
 concatMap
@@ -396,13 +396,15 @@ findIndices predicate = go 0
 scan
     :: Monad m
     => (Word8 -> Word8 -> Word8) -> Word8 -> Pipe ByteString ByteString m r
-scan step begin = go begin
+scan step begin = do
+    yield (BS.singleton begin)
+    go begin
   where
     go w8 = do
         bs <- await
         let bs' = BS.scanl step w8 bs
             w8' = BS.last bs'
-        yield bs'
+        yield (BS.tail bs')
         go w8'
 {-# INLINABLE scan #-}
 
