@@ -302,8 +302,7 @@ toHandle h = for cat (liftIO . BS.hPut h)
 {-# INLINABLE toHandle #-}
 
 {-# RULES "p >-> toHandle h" forall p h .
-        p >-> toHandle h = for p (\bs -> liftIO (BS.hPut h bs))
-  #-}
+        p >-> toHandle h = for p (\bs -> liftIO (BS.hPut h bs))  #-}
 
 -- | Apply a transformation to each 'Word8' in the stream
 map :: Monad m => (Word8 -> Word8) -> Pipe ByteString ByteString m r
