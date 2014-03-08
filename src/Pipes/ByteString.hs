@@ -1,9 +1,4 @@
-{-# LANGUAGE RankNTypes, CPP #-}
-
--- The rewrite rules require the Trustworthy annotation
-#if __GLASGOW_HASKELL__ >= 702
-{-# LANGUAGE Trustworthy #-}
-#endif
+{-# LANGUAGE RankNTypes, Trustworthy #-}
 
 {-| This module provides @pipes@ utilities for \"byte streams\", which are
     streams of strict 'ByteString's chunks.  Use byte streams to interact
