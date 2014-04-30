@@ -56,6 +56,7 @@ module Pipes.ByteString (
     , fromHandle
     , hGetSome
     , hGet
+    , hGetRange
 
     -- * Servers
     , hGetSomeN
@@ -238,6 +239,19 @@ hGet size h = go
                 yield bs
                 go
 {-# INLINABLE hGet #-}
+
+{-| Like 'hGet' but with an extra parameter specifying an initial handle offset
+-}
+hGetRange
+    :: MonadIO m
+    => Int -- ^ Offset
+    -> Int -- ^ Size
+    -> IO.Handle
+    -> Producer' ByteString m ()
+hGetRange offset size h = do
+    liftIO $ IO.hSeek h IO.AbsoluteSeek (fromIntegral offset)
+    hGet size h
+{-# INLINABLE hGetRange #-}
 
 (^.) :: a -> ((b -> Constant b b) -> (a -> Constant b a)) -> b
 a ^. lens = getConstant (lens Constant a)
