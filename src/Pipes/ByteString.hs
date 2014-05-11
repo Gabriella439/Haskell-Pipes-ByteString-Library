@@ -54,6 +54,7 @@ module Pipes.ByteString (
       fromLazy
     , stdin
     , fromHandle
+    , fromBuilder
     , hGetSome
     , hGet
     , hGetRange
@@ -146,6 +147,7 @@ import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.ByteString.Internal (isSpaceWord8)
 import qualified Data.ByteString.Lazy as BL
+import Data.ByteString.Builder (Builder, toLazyByteString)
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Char (ord)
@@ -205,6 +207,11 @@ fromHandle :: MonadIO m => IO.Handle -> Producer' ByteString m ()
 fromHandle = hGetSome defaultChunkSize
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
+
+-- | Convert a 'Builder' into a 'Producer' of strict 'ByteString's
+fromBuilder :: Monad m => Builder -> Producer' ByteString m ()
+fromBuilder = fromLazy . toLazyByteString
+{-# INLINABLE fromBuilder #-}
 
 {-| Convert a handle into a byte stream using a maximum chunk size
 
