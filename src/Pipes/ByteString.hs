@@ -129,6 +129,9 @@ module Pipes.ByteString (
     , lines
     , words
 
+    -- * Utilities
+    , pipeIso
+
     -- * Re-exports
     -- $reexports
     , module Data.ByteString
@@ -987,6 +990,14 @@ words = Data.Profunctor.dimap _words (fmap _unwords)
     --     => FreeT (Producer ByteString m) m x -> Producer ByteString m x
     _unwords = PG.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {-# INLINABLE words #-}
+
+-- | Upgrade a 'Word8' isomorphism to work with 'ByteString' 'Producer's
+pipeIso
+    :: Monad m
+    => Iso' Word8 Word8
+    -> Iso' (Proxy x' x () ByteString m r) (Proxy x' x () ByteString m r)
+pipeIso = PP.mapIso $ (<-<) . map
+{-# INLINABLE pipeIso #-}
 
 {- $parse
     The following parsing utilities are single-byte analogs of the ones found
