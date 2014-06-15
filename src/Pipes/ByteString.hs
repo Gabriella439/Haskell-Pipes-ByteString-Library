@@ -118,6 +118,7 @@ module Pipes.ByteString (
     -- * Transforming Byte Streams
     , intersperse
     , pack
+    , unpack
     , chunksOf'
 
     -- * FreeT Splitters
@@ -127,12 +128,13 @@ module Pipes.ByteString (
     , groupsBy
     , groups
     , lines
+    , unlines
     , words
+    , unwords
 
     -- * Re-exports
     -- $reexports
     , module Data.ByteString
-    , module Data.Profunctor
     , module Data.Word
     , module Pipes.Group
     , module Pipes.Parse
@@ -151,8 +153,6 @@ import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
 import Data.Char (ord)
 import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
-import Data.Profunctor (Profunctor)
-import qualified Data.Profunctor
 import qualified Data.List as List
 import Data.Word (Word8)
 import Foreign.C.Error (Errno(Errno), ePIPE)
@@ -187,6 +187,8 @@ import Prelude hiding (
     , splitAt
     , take
     , takeWhile
+    , unlines
+    , unwords
     , words
     )
 
@@ -634,16 +636,16 @@ isEndOfBytes = do
         Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
-type Lens' a b = forall f . Functor f => (b -> f b) -> (a -> f a)
-
-type Iso' a b = forall f p . (Functor f, Profunctor p) => p b (f b) -> p a (f a)
+type Lens s t a b = forall f . Functor f => (a -> f b) -> (s -> f t)
 
 -- | Improper lens that splits a 'Producer' after the given number of bytes
 splitAt
     :: (Monad m, Integral n)
     => n
-    -> Lens' (Producer ByteString m x)
-             (Producer ByteString m (Producer ByteString m x))
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 splitAt n0 k p0 = fmap join (k (go n0 p0))
   where
     -- go  :: (Monad m, Integral n)
@@ -676,8 +678,10 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
 span
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens' (Producer ByteString m x)
-             (Producer ByteString m (Producer ByteString m x))
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 span predicate k p0 = fmap join (k (go p0))
   where
     go p = do
@@ -701,8 +705,10 @@ span predicate k p0 = fmap join (k (go p0))
 break
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens' (Producer ByteString m x)
-             (Producer ByteString m (Producer ByteString m x))
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
@@ -712,8 +718,10 @@ break predicate = span (not . predicate)
 groupBy
     :: Monad m
     => (Word8 -> Word8 -> Bool)
-    -> Lens' (Producer ByteString m r)
-             (Producer ByteString m (Producer ByteString m r))
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 groupBy equals k p0 = fmap join (k (_groupBy p0))
   where
     -- _groupBy
@@ -732,8 +740,10 @@ groupBy equals k p0 = fmap join (k (_groupBy p0))
 -- | Like 'groupBy', where the equality predicate is ('==')
 group
     :: Monad m
-    => Lens' (Producer ByteString m r)
-             (Producer ByteString m (Producer ByteString m r))
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 group = groupBy (==)
 {-# INLINABLE group #-}
 
@@ -743,12 +753,14 @@ group = groupBy (==)
 
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
+    this function from the @pipes-text@ library.
 -}
 word
     :: Monad m
-    => Lens' (Producer ByteString m r)
-             (Producer ByteString m (Producer ByteString m r))
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 word k p0 = fmap join (k (to p0))
   where
     -- to
@@ -770,12 +782,14 @@ nl = fromIntegral (ord '\n')
 
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
+    this function from the @pipes-text@ library.
 -}
 line
     :: Monad m
-    => Lens' (Producer ByteString m r)
-             (Producer ByteString m (Producer ByteString m r))
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer ByteString m (Producer ByteString m x))
+            (Producer ByteString m (Producer ByteString m y))
 line = break (== nl)
 {-# INLINABLE line #-}
 
@@ -801,20 +815,37 @@ intersperse w8 = go0
                 go1 p'
 {-# INLINABLE intersperse #-}
 
--- | Improper isomorphism between a 'Producer' of 'ByteString's and 'Word8's
-pack :: Monad m => Iso' (Producer Word8 m x) (Producer ByteString m x)
-pack = Data.Profunctor.dimap to (fmap from)
-  where
-    -- to :: Monad m => Producer Word8 m x -> Producer ByteString m x
-    to p = PG.folds step id done (p^.PG.chunksOf defaultChunkSize)
+-- | Improper lens from unpacked 'Word8's to packaged 'ByteString's
+pack
+    :: Monad m
+    => Lens (Producer Word8 m x)
+            (Producer Word8 m y)
+            (Producer ByteString m x)
+            (Producer ByteString m y)
+pack k p = fmap _unpack (k (_pack p))
+{-# INLINABLE pack #-}
 
+-- | Improper lens from packed 'ByteString's to unpacked 'Word8's
+unpack
+    :: Monad m
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (Producer Word8 m x)
+            (Producer Word8 m y)
+unpack k p = fmap _pack (k (_unpack p))
+{-# INLINABLE unpack #-}
+
+_pack :: Monad m => Producer Word8 m x -> Producer ByteString m x
+_pack p = PG.folds step id done (p^.PG.chunksOf defaultChunkSize)
+  where
     step diffAs w8 = diffAs . (w8:)
 
     done diffAs = BS.pack (diffAs [])
+{-# INLINABLE _pack #-}
 
-    -- from :: Monad m => Producer ByteString m x -> Producer Word8 m x
-    from p = for p (each . BS.unpack)
-{-# INLINABLE pack #-}
+_unpack :: Monad m => Producer ByteString m x -> Producer Word8 m x
+_unpack p = for p (each . BS.unpack)
+{-# INLINABLE _unpack #-}
 
 {-| Group byte stream chunks into chunks of fixed length
 
@@ -836,7 +867,10 @@ chunksOf' n p =
 chunksOf
     :: (Monad m, Integral n)
     => n
-    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
 chunksOf n k p0 = fmap concats (k (go p0))
   where
     go p = PG.FreeT $ do
@@ -878,7 +912,10 @@ splitsWith predicate p0 = PG.FreeT (go0 p0)
 splits
     :: Monad m
     => Word8
-    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
 splits w8 k p =
     fmap (PG.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
 {-# INLINABLE splits #-}
@@ -889,7 +926,10 @@ splits w8 k p =
 groupsBy
     :: Monad m
     => (Word8 -> Word8 -> Bool)
-    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
+    -> Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
 groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
   where
     -- _groupsBy
@@ -914,79 +954,97 @@ groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
 -- | Like 'groupsBy', where the equality predicate is ('==')
 groups
     :: Monad m
-    => Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
 groups = groupsBy (==)
 {-# INLINABLE groups #-}
 
-{-| Improper isomorphism between a bytestream and its lines
+{-| Improper lens between a bytestream and its lines
 
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
+    this function from the @pipes-text@ library.
 -}
 lines
     :: Monad m
-    => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
-lines = Data.Profunctor.dimap _lines (fmap _unlines)
-  where
-    -- _lines
-    --     :: Monad m
-    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
-    _lines p0 = PG.FreeT (go0 p0)
-      where
-        go0 p = do
-            x <- next p
-            case x of
-                Left   r       -> return (PG.Pure r)
-                Right (bs, p') ->
-                    if (BS.null bs)
-                    then go0 p'
-                    else return $ PG.Free $ go1 (yield bs >> p')
-        go1 p = do
-            p' <- p^.line
-            return $ PG.FreeT $ do
-                x  <- nextByte p'
-                case x of
-                    Left   r       -> return (PG.Pure r)
-                    Right (_, p'') -> go0 p''
-
-    -- _unlines
-    --     :: Monad m
-    --      => FreeT (Producer ByteString m) m x -> Producer ByteString m x
-    _unlines = concats . PG.maps addNewline
-
-    -- addNewline
-    --     :: Monad m => Producer ByteString m r -> Producer ByteString m r
-    addNewline p = p <* yield (BS.singleton nl)
+    => Lens (Producer ByteString m x)
+            (Producer ByteString m y)
+            (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
+lines k p = fmap _unlines (k (_lines p))
 {-# INLINABLE lines #-}
 
-{-| Improper isomorphism between a bytestream and its words
+{-| Improper lens between lines and a bytestream
 
     Note: This function is purely for demonstration purposes since it assumes a
     particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
-    this function from the upcoming @pipes-text@ library.
+    this function from the @pipes-text@ library.
 -}
-words
+unlines
     :: Monad m
-    => Iso' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
-words = Data.Profunctor.dimap _words (fmap _unwords)
-  where
-    -- _words
-    --     :: Monad m
-    --     => Producer ByteString m x -> FreeT (Producer ByteString m) m x
-    _words p = PG.FreeT $ do
-            x <- next (p >-> dropWhile isSpaceWord8)
-            return $ case x of
-                Left   r       -> PG.Pure r
-                Right (bs, p') -> PG.Free $ do
-                    p'' <- (yield bs >> p')^.break isSpaceWord8
-                    return (_words p'')
+    => Lens (FreeT (Producer ByteString m) m x)
+            (FreeT (Producer ByteString m) m y)
+            (Producer ByteString m x)
+            (Producer ByteString m y)
+unlines k p = fmap _lines (k (_unlines p))
+{-# INLINABLE unlines #-}
 
-    -- _unwords
-    --     :: Monad m
-    --     => FreeT (Producer ByteString m) m x -> Producer ByteString m x
-    _unwords = PG.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
+_lines
+    :: Monad m => Producer ByteString m x -> FreeT (Producer ByteString m) m x
+_lines p0 = PG.FreeT (go0 p0)
+  where
+    go0 p = do
+        x <- next p
+        case x of
+            Left   r       -> return (PG.Pure r)
+            Right (bs, p') ->
+                if (BS.null bs)
+                then go0 p'
+                else return $ PG.Free $ go1 (yield bs >> p')
+    go1 p = do
+        p' <- p^.line
+        return $ PG.FreeT $ do
+            x  <- nextByte p'
+            case x of
+                Left   r       -> return (PG.Pure r)
+                Right (_, p'') -> go0 p''
+{-# INLINABLE _lines #-}
+
+_unlines
+    :: Monad m => FreeT (Producer ByteString m) m x -> Producer ByteString m x
+_unlines = concats . PG.maps addNewline
+  where
+    addNewline p = p <* yield (BS.singleton nl)
+{-# INLINABLE _unlines #-}
+
+{-| Convert a bytestream to delimited words
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the @pipes-text@ library.
+-}
+words :: Monad m => Producer ByteString m x -> FreeT (Producer ByteString m) m x
+words p = PG.FreeT $ do
+    x <- next (p >-> dropWhile isSpaceWord8)
+    return $ case x of
+        Left   r       -> PG.Pure r
+        Right (bs, p') -> PG.Free $ do
+            p'' <- (yield bs >> p')^.break isSpaceWord8
+            return (words p'')
 {-# INLINABLE words #-}
+
+{-| Convert delimited words back to a byte stream
+
+    Note: This function is purely for demonstration purposes since it assumes a
+    particular encoding.  You should prefer the 'Data.Text.Text' equivalent of
+    this function from the @pipes-text@ library.
+-}
+unwords
+    :: Monad m => FreeT (Producer ByteString m) m x -> Producer ByteString m x
+unwords = PG.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
+{-# INLINABLE unwords #-}
 
 {- $parse
     The following parsing utilities are single-byte analogs of the ones found
