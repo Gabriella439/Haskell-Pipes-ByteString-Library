@@ -70,9 +70,7 @@ module Pipes.ByteString (
     , map
     , concatMap
     , take
-    , drop
     , takeWhile
-    , dropWhile
     , filter
     , elemIndices
     , findIndices
@@ -116,12 +114,14 @@ module Pipes.ByteString (
     , line
 
     -- * Transforming Byte Streams
+    , drop
+    , dropWhile
     , intersperse
     , pack
     , unpack
     , chunksOf'
 
-    -- * FreeT Splitters
+    -- * FreeT Transformations
     , chunksOf
     , splitsWith
     , splits
@@ -149,7 +149,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString.Internal (isSpaceWord8)
 import qualified Data.ByteString.Lazy as BL
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
-import Data.ByteString.Unsafe (unsafeTake, unsafeDrop)
+import Data.ByteString.Unsafe (unsafeTake)
 import Data.Char (ord)
 import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
@@ -322,13 +322,12 @@ map f = P.map (BS.map f)
 {-# INLINE map #-}
 
 -- | Map a function over the byte stream and concatenate the results
-concatMap
-    :: Monad m => (Word8 -> ByteString) -> Pipe ByteString ByteString m r
+concatMap :: Monad m => (Word8 -> ByteString) -> Pipe ByteString ByteString m r
 concatMap f = P.map (BS.concatMap f)
 {-# INLINABLE concatMap #-}
 
 -- | @(take n)@ only allows @n@ bytes to pass
-take :: (Monad m, Integral a) => a -> Pipe ByteString ByteString m ()
+take :: (Monad m, Integral n) => n -> Pipe ByteString ByteString m ()
 take n0 = go n0 where
     go n
         | n <= 0    = return ()
@@ -341,21 +340,6 @@ take n0 = go n0 where
                     yield bs
                     go (n - len)
 {-# INLINABLE take #-}
-
--- | @(drop n)@ drops the first @n@ bytes
-drop :: (Monad m, Integral a) => a -> Pipe ByteString ByteString m r
-drop n0 = go n0 where
-    go n
-        | n <= 0    = cat
-        | otherwise = do
-            bs <- await
-            let len = fromIntegral (BS.length bs)
-            if (len >= n)
-                then do
-                    yield (unsafeDrop (fromIntegral n) bs)
-                    cat
-                else go (n - len)
-{-# INLINABLE drop #-}
 
 -- | Take bytes until they fail the predicate
 takeWhile :: Monad m => (Word8 -> Bool) -> Pipe ByteString ByteString m ()
@@ -370,18 +354,6 @@ takeWhile predicate = go
                 go
             else yield prefix
 {-# INLINABLE takeWhile #-}
-
--- | Drop bytes until they fail the predicate
-dropWhile :: Monad m => (Word8 -> Bool) -> Pipe ByteString ByteString m r
-dropWhile predicate = go where
-    go = do
-        bs <- await
-        case BS.findIndex (not . predicate) bs of
-            Nothing -> go
-            Just i -> do
-                yield (unsafeDrop i bs)
-                cat
-{-# INLINABLE dropWhile #-}
 
 -- | Only allows 'Word8's to pass if they satisfy the predicate
 filter :: Monad m => (Word8 -> Bool) -> Pipe ByteString ByteString m r
@@ -538,9 +510,9 @@ find predicate p = head (p >-> filter predicate)
 
 -- | Index into a byte stream
 index
-    :: (Monad m, Integral a)
-    => a-> Producer ByteString m () -> m (Maybe Word8)
-index n p = head (p >-> drop n)
+    :: (Monad m, Integral n)
+    => n -> Producer ByteString m () -> m (Maybe Word8)
+index n p = head (drop n p)
 {-# INLINABLE index #-}
 
 -- | Find the index of an element that matches the given 'Word8'
@@ -774,12 +746,28 @@ nl = fromIntegral (ord '\n')
 -}
 line
     :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    => Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 line = break (== nl)
 {-# INLINABLE line #-}
+
+-- | @(drop n)@ drops the first @n@ bytes
+drop
+    :: (Monad m, Integral n)
+    => n -> Producer ByteString m r -> Producer ByteString m r
+drop n p = do
+    p' <- lift $ runEffect (for (p ^. splitAt n) discard)
+    p'
+{-# INLINABLE drop #-}
+
+-- | Drop bytes until they fail the predicate
+dropWhile
+    :: Monad m
+    => (Word8 -> Bool) -> Producer ByteString m r -> Producer ByteString m r
+dropWhile predicate p = do
+    p' <- lift $ runEffect (for (p ^. span predicate) discard)
+    p'
+{-# INLINABLE dropWhile #-}
 
 -- | Intersperse a 'Word8' in between the bytes of the byte stream
 intersperse
@@ -986,7 +974,7 @@ _unlines = concats . PG.maps addNewline
 -}
 words :: Monad m => Producer ByteString m x -> FreeT (Producer ByteString m) m x
 words p = PG.FreeT $ do
-    x <- next (p >-> dropWhile isSpaceWord8)
+    x <- next (dropWhile isSpaceWord8 p)
     return $ case x of
         Left   r       -> PG.Pure r
         Right (bs, p') -> PG.Free $ do
