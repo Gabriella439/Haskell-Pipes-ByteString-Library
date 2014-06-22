@@ -636,16 +636,14 @@ isEndOfBytes = do
         Just _  -> False )
 {-# INLINABLE isEndOfBytes #-}
 
-type Lens s t a b = forall f . Functor f => (a -> f b) -> (s -> f t)
+type Lens' a b = forall f . Functor f => (b -> f b) -> (a -> f a)
 
 -- | Improper lens that splits a 'Producer' after the given number of bytes
 splitAt
     :: (Monad m, Integral n)
     => n
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 splitAt n0 k p0 = fmap join (k (go n0 p0))
   where
     -- go  :: (Monad m, Integral n)
@@ -678,10 +676,8 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
 span
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 span predicate k p0 = fmap join (k (go p0))
   where
     go p = do
@@ -705,10 +701,8 @@ span predicate k p0 = fmap join (k (go p0))
 break
     :: Monad m
     => (Word8 -> Bool)
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
@@ -718,10 +712,8 @@ break predicate = span (not . predicate)
 groupBy
     :: Monad m
     => (Word8 -> Word8 -> Bool)
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 groupBy equals k p0 = fmap join (k (_groupBy p0))
   where
     -- _groupBy
@@ -740,10 +732,8 @@ groupBy equals k p0 = fmap join (k (_groupBy p0))
 -- | Like 'groupBy', where the equality predicate is ('==')
 group
     :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    => Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 group = groupBy (==)
 {-# INLINABLE group #-}
 
@@ -757,10 +747,8 @@ group = groupBy (==)
 -}
 word
     :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer ByteString m (Producer ByteString m x))
-            (Producer ByteString m (Producer ByteString m y))
+    => Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
 word k p0 = fmap join (k (to p0))
   where
     -- to
@@ -816,22 +804,12 @@ intersperse w8 = go0
 {-# INLINABLE intersperse #-}
 
 -- | Improper lens from unpacked 'Word8's to packaged 'ByteString's
-pack
-    :: Monad m
-    => Lens (Producer Word8 m x)
-            (Producer Word8 m y)
-            (Producer ByteString m x)
-            (Producer ByteString m y)
+pack :: Monad m => Lens' (Producer Word8 m x) (Producer ByteString m x)
 pack k p = fmap _unpack (k (_pack p))
 {-# INLINABLE pack #-}
 
 -- | Improper lens from packed 'ByteString's to unpacked 'Word8's
-unpack
-    :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (Producer Word8 m x)
-            (Producer Word8 m y)
+unpack :: Monad m => Lens' (Producer ByteString m x) (Producer Word8 m x)
 unpack k p = fmap _pack (k (_unpack p))
 {-# INLINABLE unpack #-}
 
@@ -866,11 +844,7 @@ chunksOf' n p =
 -- | Split a byte stream into 'FreeT'-delimited byte streams of fixed size
 chunksOf
     :: (Monad m, Integral n)
-    => n
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
+    => n -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 chunksOf n k p0 = fmap concats (k (go p0))
   where
     go p = PG.FreeT $ do
@@ -912,10 +886,7 @@ splitsWith predicate p0 = PG.FreeT (go0 p0)
 splits
     :: Monad m
     => Word8
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 splits w8 k p =
     fmap (PG.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
 {-# INLINABLE splits #-}
@@ -926,10 +897,7 @@ splits w8 k p =
 groupsBy
     :: Monad m
     => (Word8 -> Word8 -> Bool)
-    -> Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
   where
     -- _groupsBy
@@ -954,10 +922,7 @@ groupsBy equals k p0 = fmap concats (k (_groupsBy p0))
 -- | Like 'groupsBy', where the equality predicate is ('==')
 groups
     :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
+    => Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 groups = groupsBy (==)
 {-# INLINABLE groups #-}
 
@@ -969,10 +934,7 @@ groups = groupsBy (==)
 -}
 lines
     :: Monad m
-    => Lens (Producer ByteString m x)
-            (Producer ByteString m y)
-            (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
+    => Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
 lines k p = fmap _unlines (k (_lines p))
 {-# INLINABLE lines #-}
 
@@ -984,10 +946,7 @@ lines k p = fmap _unlines (k (_lines p))
 -}
 unlines
     :: Monad m
-    => Lens (FreeT (Producer ByteString m) m x)
-            (FreeT (Producer ByteString m) m y)
-            (Producer ByteString m x)
-            (Producer ByteString m y)
+    => Lens' (FreeT (Producer ByteString m) m x) (Producer ByteString m x)
 unlines k p = fmap _lines (k (_unlines p))
 {-# INLINABLE unlines #-}
 
