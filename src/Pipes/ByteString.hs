@@ -1001,8 +1001,6 @@ unwords = PG.intercalates (yield $ BS.singleton $ fromIntegral $ ord ' ')
 {- $reexports
     @Data.ByteString@ re-exports the 'ByteString' type.
 
-    @Data.Profunctor@ re-exports the 'Profunctor' type.
-
     @Data.Word@ re-exports the 'Word8' type.
 
     @Pipes.Parse@ re-exports 'Parser'.
