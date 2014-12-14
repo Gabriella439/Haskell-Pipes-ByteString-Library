@@ -55,6 +55,7 @@ module Pipes.ByteString (
     , stdin
     , fromHandle
     , hGetSome
+    , hGetNonBlocking
     , hGet
     , hGetRange
 
@@ -224,6 +225,23 @@ hGetSome size h = go
                 yield bs
                 go
 {-# INLINABLE hGetSome #-}
+
+{-| Convert a handle into a byte stream using a fixed chunk size
+
+    Similar to 'hGet' except that it will never block waiting for data
+    to become available.
+-}
+hGetNonBlocking :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
+hGetNonBlocking size h = go where
+    go = do
+        eof <- liftIO (IO.hIsEOF h)
+        if eof
+            then return ()
+            else do
+                bs <- liftIO (BS.hGetNonBlocking h size)
+                yield bs
+                go
+{-# INLINABLE hGetNonBlocking #-}
 
 {-| Convert a handle into a byte stream using a fixed chunk size
 
