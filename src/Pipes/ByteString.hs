@@ -55,6 +55,7 @@ module Pipes.ByteString (
     , stdin
     , fromHandle
     , hGetSome
+    , hGetNonBlocking
     , hGet
     , hGetRange
 
