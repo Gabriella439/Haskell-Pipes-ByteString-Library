@@ -53,10 +53,13 @@ module Pipes.ByteString (
     -- * Producers
       fromLazy
     , stdin
+    , fromHandleFollow
     , fromHandle
     , hGetSome
+    , hGetSomeFollow
     , hGetNonBlocking
     , hGet
+    , hGetFollow
     , hGetRange
 
     -- * Servers
@@ -166,6 +169,7 @@ import qualified Pipes.Parse as PP
 import Pipes.Parse (Parser)
 import qualified Pipes.Prelude as P
 import qualified System.IO as IO
+import Control.Concurrent (threadDelay)
 import Prelude hiding (
       all
     , any
@@ -204,10 +208,41 @@ stdin = fromHandle IO.stdin
 {-# INLINABLE stdin #-}
 
 -- | Convert a 'IO.Handle' into a byte stream using a default chunk size
+fromHandleFollow :: MonadIO m => Maybe Int -> IO.Handle -> Producer' ByteString m ()
+fromHandleFollow interval = hGetSomeFollow interval defaultChunkSize
+-- TODO: Test chunk size for performance
+{-# INLINABLE fromHandleFollow #-}
+
+-- | Convert a 'IO.Handle' into a byte stream using a default chunk size
 fromHandle :: MonadIO m => IO.Handle -> Producer' ByteString m ()
-fromHandle = hGetSome defaultChunkSize
+fromHandle = fromHandleFollow Nothing
 -- TODO: Test chunk size for performance
 {-# INLINABLE fromHandle #-}
+
+{-| Convert a handle into a byte stream using a maximum chunk size
+
+    'hGetSomeFollow' forwards input immediately as it becomes available, 
+    splitting the input into multiple chunks if it exceeds the maximum chunk 
+    size. If first parameter is 'Just', then pipe won't exit when eof is
+    reached. It will attempt to read more data after specified period of
+    time.
+-}
+hGetSomeFollow
+  :: MonadIO m => Maybe Int -> Int -> IO.Handle -> Producer' ByteString m ()
+hGetSomeFollow interval size h = go
+  where
+    go = do
+        bs <- liftIO (BS.hGetSome h size)
+        if (BS.null bs)
+            then case interval of
+               Nothing -> return ()
+               Just t -> do
+                 liftIO $ threadDelay t
+                 go
+            else do
+                yield bs
+                go
+{-# INLINABLE hGetSomeFollow #-}
 
 {-| Convert a handle into a byte stream using a maximum chunk size
 
@@ -215,15 +250,7 @@ fromHandle = hGetSome defaultChunkSize
     input into multiple chunks if it exceeds the maximum chunk size.
 -}
 hGetSome :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
-hGetSome size h = go
-  where
-    go = do
-        bs <- liftIO (BS.hGetSome h size)
-        if (BS.null bs)
-            then return ()
-            else do
-                yield bs
-                go
+hGetSome = hGetSomeFollow Nothing
 {-# INLINABLE hGetSome #-}
 
 {-| Convert a handle into a byte stream using a fixed chunk size
@@ -245,19 +272,35 @@ hGetNonBlocking size h = go where
 
 {-| Convert a handle into a byte stream using a fixed chunk size
 
-    'hGet' waits until exactly the requested number of bytes are available for
-    each chunk.
+    'hGetFollow' waits until exactly the requested number of bytes 
+    are available for each chunk. If first parameter is 'Just', then 
+    pipe won't exit when eof is reached. It will attempt to read 
+    more data after specified period of time.
 -}
-hGet :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
-hGet size h = go
+hGetFollow
+  :: MonadIO m => Maybe Int -> Int -> IO.Handle -> Producer' ByteString m ()
+hGetFollow interval size h = go
   where
     go = do
         bs <- liftIO (BS.hGet h size)
         if (BS.null bs)
-            then return ()
+            then case interval of
+                Nothing -> return ()
+                Just t -> do
+                    liftIO $ threadDelay t
+                    go
             else do
                 yield bs
                 go
+{-# INLINABLE hGetFollow #-}
+
+{-| convert a handle into a byte stream using a fixed chunk size
+
+    'hGet' waits until exactly the requested number of bytes are available for
+    each chunk.
+-}
+hGet :: MonadIO m => Int -> IO.Handle -> Producer' ByteString m ()
+hGet = hGetFollow Nothing
 {-# INLINABLE hGet #-}
 
 {-| Like 'hGet' but with an extra parameter specifying an initial handle offset
@@ -301,7 +344,7 @@ hGetN h = go
             else do
                 size2 <- respond bs
                 go size2
-{-# INLINABLE hGetN #-}
+{-# INLINABLE hGetN #-} 
 
 {-| Stream bytes to 'stdout'
 
