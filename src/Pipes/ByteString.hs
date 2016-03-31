@@ -328,7 +328,7 @@ stdout = go
 -}
 toHandle :: MonadIO m => IO.Handle -> Consumer' ByteString m r
 toHandle h = for cat (liftIO . BS.hPut h)
-{-# INLINABLE toHandle #-}
+{-# INLINABLE [1] toHandle #-}
 
 {-# RULES "p >-> toHandle h" forall p h .
         p >-> toHandle h = for p (\bs -> liftIO (BS.hPut h bs))
