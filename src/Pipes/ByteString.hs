@@ -328,7 +328,7 @@ stdout = go
 -}
 toHandle :: MonadIO m => IO.Handle -> Consumer' ByteString m r
 toHandle h = for cat (liftIO . BS.hPut h)
-{-# INLINABLE toHandle #-}
+{-# INLINABLE [1] toHandle #-}
 
 {-# RULES "p >-> toHandle h" forall p h .
         p >-> toHandle h = for p (\bs -> liftIO (BS.hPut h bs))
@@ -389,7 +389,7 @@ findIndices predicate = go 0
   where
     go n = do
         bs <- await
-	each $ List.map (\i -> n + fromIntegral i) (BS.findIndices predicate bs)
+        each $ List.map (\i -> n + fromIntegral i) (BS.findIndices predicate bs)
         go $! n + fromIntegral (BS.length bs)
 {-# INLINABLE findIndices #-}
 
@@ -643,7 +643,7 @@ splitAt n0 k p0 = fmap join (k (go n0 p0))
     go n p =
         if (n <= 0)
         then return p
-	else do
+        else do
             x <- lift (next p)
             case x of
                 Left   r       -> return (return r)
