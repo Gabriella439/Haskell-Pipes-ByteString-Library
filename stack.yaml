@@ -1,3 +1,5 @@
-resolver: lts-5.11
-packages:
-- .
+resolver: lts-7.11
+# extra-deps:
+# - pipes-4.3.0
+# - pipes-parse-3.0.8
+# - pipes-group-1.0.6
