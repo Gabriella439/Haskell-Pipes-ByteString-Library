@@ -80,6 +80,7 @@ module Pipes.ByteString (
     -- * Folds
     , toLazy
     , toLazyM
+    , toLazyM'
     , foldBytes
     , head
     , last
@@ -426,6 +427,18 @@ toLazy = BL.fromChunks . P.toList
 toLazyM :: Monad m => Producer ByteString m () -> m BL.ByteString
 toLazyM = liftM BL.fromChunks . P.toListM
 {-# INLINABLE toLazyM #-}
+
+{-| Fold an effectful 'Producer' of strict 'ByteString's into a lazy
+    'BL.ByteString' alongside the return value
+
+    Note: 'toLazyM'' is not an idiomatic use of @pipes@, but I provide it for
+    simple testing purposes.  Idiomatic @pipes@ style consumes the chunks
+    immediately as they are generated instead of loading them all into memory.
+-}
+toLazyM' :: Monad m => Producer ByteString m a -> m (BL.ByteString, a)
+toLazyM' p = do (chunks, a) <- P.toListM' p
+                return (BL.fromChunks chunks, a)
+{-# INLINABLE toLazyM' #-}
 
 {-| Reduce the stream of bytes using a strict left fold
 
