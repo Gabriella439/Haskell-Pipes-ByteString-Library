@@ -155,7 +155,7 @@ import qualified Data.ByteString.Search
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake)
 import Data.Char (ord)
-import Data.Monoid ((<>))
+import Data.Monoid (mempty, (<>))
 import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
 import qualified Data.List as List
