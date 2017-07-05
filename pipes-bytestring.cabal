@@ -23,6 +23,7 @@ Library
         pipes        >= 4.0     && < 4.4 ,
         pipes-group  >= 1.0.0   && < 1.1 ,
         pipes-parse  >= 3.0.0   && < 3.1 ,
+        stringsearch >= 0.3.0   && < 0.4 ,
         transformers >= 0.2.0.0 && < 0.6
     Exposed-Modules: Pipes.ByteString
     GHC-Options: -O2 -Wall

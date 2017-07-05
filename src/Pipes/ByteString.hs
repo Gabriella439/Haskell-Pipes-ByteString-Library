@@ -127,6 +127,7 @@ module Pipes.ByteString (
     , chunksOf
     , splitsWith
     , splits
+    , breakOn
     , groupsBy
     , groups
     , lines
@@ -150,9 +151,11 @@ import qualified Data.ByteString as BS
 import Data.ByteString (ByteString)
 import Data.ByteString.Internal (isSpaceWord8)
 import qualified Data.ByteString.Lazy as BL
+import qualified Data.ByteString.Search
 import Data.ByteString.Lazy.Internal (foldrChunks, defaultChunkSize)
 import Data.ByteString.Unsafe (unsafeTake)
 import Data.Char (ord)
+import Data.Monoid (mempty, (<>))
 import Data.Functor.Constant (Constant(Constant, getConstant))
 import Data.Functor.Identity (Identity)
 import qualified Data.List as List
@@ -909,6 +912,43 @@ splits
 splits w8 k p =
     fmap (PG.intercalates (yield (BS.singleton w8))) (k (splitsWith (w8 ==) p))
 {-# INLINABLE splits #-}
+
+-- | Split a byte stream into groups separated by the given `ByteString`
+breakOn
+    :: Monad m
+    => ByteString
+    -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
+breakOn needle k p0 =
+    fmap
+        (PG.intercalates (yield needle))
+        (k (PG.FreeT (return (PG.Free (go mempty p0)))))
+  where
+    len0 = BS.length needle
+
+    go leftovers p =
+        if BS.length leftovers < len0
+        then do
+            x <- lift (next p)
+            case x of
+                Left   r          -> do
+                    yield leftovers
+                    return (return r)
+                Right (bytes, p') -> do
+                    go (leftovers <> bytes) p'
+        else do
+            let (prefix, suffix) = Data.ByteString.Search.breakOn needle leftovers
+            if BS.null suffix
+                then do
+                    let len = BS.length leftovers
+                    let (output, leftovers') =
+                            BS.splitAt (len + 1 - len0) leftovers
+                    yield output
+                    go leftovers' p
+                else do
+                    yield prefix
+                    let suffix' = BS.drop len0 suffix
+                    return (PG.FreeT (return (PG.Free (go suffix' p))))
+{-# INLINABLE breakOn #-}
 
 {-| Isomorphism between a byte stream and groups of identical bytes using the
     supplied equality predicate
