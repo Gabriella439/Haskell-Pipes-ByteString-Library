@@ -110,6 +110,7 @@ module Pipes.ByteString (
     , splitAt
     , span
     , break
+    , breakOn
     , groupBy
     , group
     , word
@@ -127,7 +128,7 @@ module Pipes.ByteString (
     , chunksOf
     , splitsWith
     , splits
-    , breakOn
+    , splitOn
     , groupsBy
     , groups
     , lines
@@ -712,6 +713,42 @@ break
 break predicate = span (not . predicate)
 {-# INLINABLE break #-}
 
+{-| Improper lens that splits at the first occurrence of the pattern.
+-}
+breakOn
+    :: Monad m
+    => ByteString
+    -> Lens' (Producer ByteString m x)
+             (Producer ByteString m (Producer ByteString m x))
+breakOn needle k p0 =
+    fmap join (k (go mempty p0))
+  where
+    len0 = BS.length needle
+
+    go leftovers p =
+        if BS.length leftovers < len0
+        then do
+            x <- lift (next p)
+            case x of
+                Left   r          -> do
+                    yield leftovers
+                    return (return r)
+                Right (bytes, p') -> do
+                    go (leftovers <> bytes) p'
+        else do
+            let (prefix, suffix) = Data.ByteString.Search.breakOn needle leftovers
+            if BS.null suffix
+                then do
+                    let len = BS.length leftovers
+                    let (output, leftovers') =
+                            BS.splitAt (len + 1 - len0) leftovers
+                    yield output
+                    go leftovers' p
+                else do
+                    yield prefix
+                    return (yield suffix >> p)
+{-# INLINABLE breakOn #-}
+
 {-| Improper lens that splits after the first group of matching bytes, as
     defined by the given equality predicate
 -}
@@ -914,41 +951,24 @@ splits w8 k p =
 {-# INLINABLE splits #-}
 
 -- | Split a byte stream into groups separated by the given `ByteString`
-breakOn
+splitOn
     :: Monad m
     => ByteString
     -> Lens' (Producer ByteString m x) (FreeT (Producer ByteString m) m x)
-breakOn needle k p0 =
+splitOn needle k p0 =
     fmap
         (PG.intercalates (yield needle))
-        (k (PG.FreeT (return (PG.Free (go mempty p0)))))
+        (k (go p0))
   where
     len0 = BS.length needle
-
-    go leftovers p =
-        if BS.length leftovers < len0
-        then do
-            x <- lift (next p)
-            case x of
-                Left   r          -> do
-                    yield leftovers
-                    return (return r)
-                Right (bytes, p') -> do
-                    go (leftovers <> bytes) p'
-        else do
-            let (prefix, suffix) = Data.ByteString.Search.breakOn needle leftovers
-            if BS.null suffix
-                then do
-                    let len = BS.length leftovers
-                    let (output, leftovers') =
-                            BS.splitAt (len + 1 - len0) leftovers
-                    yield output
-                    go leftovers' p
-                else do
-                    yield prefix
-                    let suffix' = BS.drop len0 suffix
-                    return (PG.FreeT (return (PG.Free (go suffix' p))))
-{-# INLINABLE breakOn #-}
+    go p = PG.FreeT $ do
+        x <- next p
+        return $ case x of
+            Left   r       -> PG.Pure r
+            Right (bs, p') -> PG.Free $ do
+                p'' <- (yield bs >> p')^.(breakOn needle)
+                return (go (drop len0 p''))
+{-# INLINABLE splitOn #-}
 
 {-| Isomorphism between a byte stream and groups of identical bytes using the
     supplied equality predicate
