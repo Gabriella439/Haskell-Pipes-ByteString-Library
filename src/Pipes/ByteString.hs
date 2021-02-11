@@ -284,7 +284,7 @@ a ^. lens = getConstant (lens Constant a)
 {-| Like 'hGetSome', except you can vary the maximum chunk size for each request
 -}
 hGetSomeN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
-hGetSomeN h = go
+hGetSomeN h size = go size
   where
     go size = do
         bs <- liftIO (BS.hGetSome h size)
@@ -297,7 +297,7 @@ hGetSomeN h = go
 
 -- | Like 'hGet', except you can vary the chunk size for each request
 hGetN :: MonadIO m => IO.Handle -> Int -> Server' Int ByteString m ()
-hGetN h = go
+hGetN h size = go size
   where
     go size = do
         bs <- liftIO (BS.hGet h size)
