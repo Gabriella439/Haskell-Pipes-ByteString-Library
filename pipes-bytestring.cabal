@@ -1,6 +1,6 @@
 Name: pipes-bytestring
-Version: 2.1.6
-Cabal-Version: >=1.8.0.2
+Version: 2.1.7
+Cabal-Version: >=1.10
 Build-Type: Simple
 License: BSD3
 License-File: LICENSE
@@ -27,3 +27,4 @@ Library
         transformers >= 0.2.0.0 && < 0.6
     Exposed-Modules: Pipes.ByteString
     GHC-Options: -O2 -Wall
+    Default-Language: Haskell2010
